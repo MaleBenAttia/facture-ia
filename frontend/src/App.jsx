@@ -1,7 +1,6 @@
 import { useCallback, useState } from "react";
 import { motion } from "framer-motion";
 import { Navbar } from "./components/Navbar";
-import { HeroScroll } from "./components/HeroScroll";
 import { ScanZone } from "./components/ScanZone";
 import { InvoicePreview } from "./components/InvoicePreview";
 import { InvoiceHistory } from "./components/InvoiceHistory";
@@ -146,18 +145,34 @@ function AppContenu() {
       {/* 2. Navbar fixe */}
       <Navbar />
 
-      {/* 3. Hero cinématique */}
-      <HeroScroll />
-
       {/* 4. Contenu principal */}
       <div className="relative" style={{ zIndex: 10 }}>
         <main>
-          <div className="mx-auto max-w-3xl px-4 sm:px-6 pb-28 pt-10">
+          <div className="mx-auto max-w-4xl px-4 sm:px-6 pb-32 pt-28">
+
+            {/* Bandeau discret en haut */}
+            <div className="mb-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <h1 className="text-3xl font-black tracking-tight drop-shadow-sm" style={{ color: "var(--color-primary)" }}>
+                  Scanner vos factures
+                </h1>
+                <p className="mt-1 text-sm font-medium text-slate-500">
+                  Importez une image ou un PDF pour extraire les données.
+                </p>
+              </div>
+              <div className="inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-white/50 px-3 py-1.5 text-[11px] font-bold tracking-widest text-[var(--color-primary)] uppercase shadow-sm">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--color-primary)] opacity-75"></span>
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-[var(--color-primary)]"></span>
+                </span>
+                Système en ligne
+              </div>
+            </div>
 
             {/* Zone de scan */}
             <motion.section
               id="scanner"
-              className="scroll-mt-20"
+              className="scroll-mt-32"
               variants={fadeUp}
               initial="hidden"
               whileInView="visible"
@@ -180,7 +195,7 @@ function AppContenu() {
             {etat === "succes" && resultat && (
               <motion.section
                 id="resultat"
-                className="mt-8 scroll-mt-20"
+                className="mt-12 scroll-mt-32"
                 variants={fadeUp}
                 initial="hidden"
                 animate="visible"
@@ -200,7 +215,7 @@ function AppContenu() {
             {/* Historique */}
             <motion.section
               id="history"
-              className="mt-8 scroll-mt-20"
+              className="mt-12 scroll-mt-32"
               variants={fadeUp}
               initial="hidden"
               whileInView="visible"

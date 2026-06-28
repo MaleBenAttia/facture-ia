@@ -31,9 +31,8 @@ export function FloatingIconsBackground() {
       <style>{`
         @keyframes float-icon {
           0% { transform: translate(0, 0) rotate(0deg); }
-          25% { transform: translate(15px, -20px) rotate(15deg); }
-          50% { transform: translate(-10px, 15px) rotate(-10deg); }
-          75% { transform: translate(-20px, -15px) rotate(-20deg); }
+          33% { transform: translate(40px, -60px) rotate(45deg); }
+          66% { transform: translate(-30px, 40px) rotate(-30deg); }
           100% { transform: translate(0, 0) rotate(0deg); }
         }
       `}</style>
@@ -41,26 +40,25 @@ export function FloatingIconsBackground() {
       {iconsData.map(({ id, Icon, left, top, size, rotation, animDuration, animDelay }) => (
         <div
           key={id}
-          className="absolute text-slate-400 opacity-[0.08]"
+          className="absolute text-slate-900 opacity-[0.04]"
           style={{
             left,
             top,
             width: size,
             height: size,
-            transform: `rotate(${rotation}deg)`,
             animation: `float-icon ${animDuration}s infinite ease-in-out`,
             animationDelay: `${animDelay}s`,
           }}
         >
-          <Icon strokeWidth={1.5} className="w-full h-full" />
+          <Icon strokeWidth={1.5} className="w-full h-full" style={{ transform: `rotate(${rotation}deg)` }} />
         </div>
       ))}
       
       {/* Léger grain ou gradient pour habiller le fond sans être uni */}
       <div 
-        className="absolute inset-0 opacity-[0.3]"
+        className="absolute inset-0 opacity-[0.4]"
         style={{
-          background: "radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.03) 100%)",
+          background: "radial-gradient(circle at 50% 50%, rgba(200,200,200,0.05) 0%, rgba(0,0,0,0.03) 100%)",
         }}
       />
     </div>
