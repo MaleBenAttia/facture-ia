@@ -131,9 +131,21 @@ git status
 git add .
 
 # 3. Créer un commit avec un message descriptif
-git commit -m "Description de ce qui a changé"
+git commit -m "correction vpn"
 
 # 4. Envoyer les modifications sur GitHub
 git push origin main
 ```
 
+---
+
+## 🐛 Notes sur les Problèmes Réseaux Résolus (VPN / Mobile)
+
+Lors du test de l'application via un réseau local (`192.168.x.x`) ou un VPN (comme **Tailscale**), deux problèmes techniques majeurs ont été identifiés et corrigés :
+
+1. **La limitation des payloads sur Safari iOS (`ConnectionResetError`) :** 
+   Safari (particulièrement sur iPhone) coupe brutalement les requêtes HTTP qui durent trop longtemps ou qui tentent de télécharger un fichier JSON trop lourd d'un seul coup. 
+   **Solution implémentée :** Un système de *Polling en 3 étapes* (Lancement du job ➔ Demande légère du statut ➔ Récupération dédiée du gros JSON).
+2. **Le blocage de `crypto.randomUUID()` hors HTTPS :**
+   Les navigateurs modernes désactivent les API cryptographiques (`crypto.randomUUID`) lorsque la connexion n'est pas sécurisée (tout ce qui n'est pas `https://` ou `localhost`). L'application plantait silencieusement au moment de sauvegarder l'historique sur IP locale, déclenchant une fausse erreur de "Timeout serveur".
+   **Solution implémentée :** Utilisation d'un générateur d'identifiant unique (UUID) alternatif fonctionnant sur les contextes non-sécurisés (HTTP simple).

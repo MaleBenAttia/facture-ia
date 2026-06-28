@@ -43,47 +43,68 @@ export async function verifierSante() {
 }
 
 /**
- * Envoie une facture (image ou PDF) au backend pour extraction + génération
- * Excel/PDF. Retourne { data, excel, pdf }.
+ * Envoie une facture au backend, reçoit un job_id immédiatement,
+ * puis poll /status/{job_id} toutes les 2s jusqu'à obtenir le résultat.
+ * Cette approche évite les timeouts mobiles sur les longues requêtes.
  */
-export async function traiterFacture(file, { onProgress } = {}) {
+export async function traiterFacture(file) {
   const formData = new FormData();
   formData.append("file", file);
 
-  // XHR plutôt que fetch ici, pour pouvoir suivre la progression de l'upload
-  // (fetch ne donne pas d'event de progression natif sur le corps envoyé).
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${API_BASE}/process`);
+  // Étape 1 : upload + démarrage du job (réponse immédiate < 1s)
+  let jobId;
+  try {
+    const res = await fetch(`${API_BASE}/process`, {
+      method: "POST",
+      body: formData,
+    });
+    await gererReponse(res);
+    const body = await res.json();
+    jobId = body.job_id;
+    if (!jobId) throw new ApiError("Réponse inattendue du serveur (pas de job_id)", 500);
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError("Impossible de démarrer le traitement", 0);
+  }
 
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) {
-        onProgress(Math.round((e.loaded / e.total) * 100));
+  // Étape 2 : polling du résultat toutes les 2s (max 3 minutes)
+  const MAX_ATTENTE_MS = 180_000;
+  const INTERVALLE_MS  = 2_000;
+  const debut = Date.now();
+
+  while (Date.now() - debut < MAX_ATTENTE_MS) {
+    await new Promise((r) => setTimeout(r, INTERVALLE_MS));
+    try {
+      const res = await fetch(`${API_BASE}/status/${jobId}`);
+      if (!res.ok) {
+        // Erreur HTTP passagère (ex: serveur en train de redémarrer) → on réessaie
+        continue;
       }
-    };
+      const job = await res.json();
 
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          resolve(JSON.parse(xhr.responseText));
-        } catch {
-          reject(new ApiError("Réponse invalide du serveur", xhr.status));
+      if (job.status === "done") {
+        // Étape 3 : récupérer les données complètes dans une requête dédiée
+        // (la réponse /status est légère, les données sont dans /result)
+        const resData = await fetch(`${API_BASE}/result/${jobId}`);
+        if (!resData.ok) {
+          // Si /result échoue, on réessaie au prochain tour
+          continue;
         }
-      } else {
-        let detail = `Erreur serveur (${xhr.status})`;
-        try {
-          const body = JSON.parse(xhr.responseText);
-          if (body?.detail) detail = body.detail;
-        } catch {
-          // ignore
-        }
-        reject(new ApiError(detail, xhr.status));
+        const { data } = await resData.json();
+        return { data, excel: job.excel, pdf: job.pdf };
       }
-    };
+      if (job.status === "error") {
+        // Le serveur a retourné une erreur métier explicite → on échoue
+        throw new ApiError(job.detail || "Erreur lors du traitement", 500);
+      }
+      // status === "processing" ou "not_found" (serveur redémarré) → on réessaie
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      // Erreur réseau passagère (VPN/WiFi instable) → on réessaie silencieusement
+    }
+  }
 
-    xhr.onerror = () => reject(new ApiError("Connexion au serveur impossible", 0));
-    xhr.send(formData);
-  });
+  throw new ApiError("Délai d'attente dépassé (3 minutes). Réessayez.", 408);
 }
 
 /** Construit l'URL de téléchargement pour une feuille Excel donnée. */

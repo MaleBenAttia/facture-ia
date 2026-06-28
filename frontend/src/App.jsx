@@ -76,16 +76,22 @@ function AppContenu() {
       setProgression(100);
       setEtat("succes");
       setResultat(reponse);
-      const entree = { id: crypto.randomUUID(), fichier: fichierActuel, ...reponse };
+      
+      // Fallback pour HTTP local/VPN (crypto.randomUUID n'existe que sur HTTPS ou localhost)
+      const id = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
+      
+      const entree = { id, fichier: fichierActuel, ...reponse };
       setHistorique((h) => [entree, ...h]);
       setSelectionneeId(entree.id);
       toast({ variant: "success", title: "Facture analysée", description: "Données extraites avec succès." });
     } catch (err) {
       clearInterval(interval);
       setEtat("erreur");
-      const message = err instanceof ApiError ? err.message : "Connexion au serveur impossible.";
+      // Diagnostic: afficher le type ET le message exact de l'erreur
+      const message = err instanceof ApiError
+        ? err.message
+        : `[${err?.constructor?.name || "Error"}] ${err?.message || "inconnu"}`;
       toast({ variant: "error", title: "Extraction impossible", description: message });
-
     }
   }, [fichierActuel, toast]);
 
