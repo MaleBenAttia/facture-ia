@@ -26,13 +26,13 @@ export function FloatingIconsBackground() {
   const iconsData = useMemo(() => generateRandomIcons(15), []);
 
   return (
-    <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none bg-[var(--color-bg)]">
+    <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
       
       <style>{`
         @keyframes float-icon {
           0% { transform: translate(0, 0) rotate(0deg); }
-          33% { transform: translate(40px, -60px) rotate(45deg); }
-          66% { transform: translate(-30px, 40px) rotate(-30deg); }
+          33% { transform: translate(60px, -80px) rotate(60deg); }
+          66% { transform: translate(-40px, 60px) rotate(-40deg); }
           100% { transform: translate(0, 0) rotate(0deg); }
         }
       `}</style>
@@ -40,7 +40,7 @@ export function FloatingIconsBackground() {
       {iconsData.map(({ id, Icon, left, top, size, rotation, animDuration, animDelay }) => (
         <div
           key={id}
-          className="absolute text-slate-900 opacity-[0.04]"
+          className="absolute text-[#c7a3a5] opacity-50"
           style={{
             left,
             top,
@@ -56,9 +56,9 @@ export function FloatingIconsBackground() {
       
       {/* Léger grain ou gradient pour habiller le fond sans être uni */}
       <div 
-        className="absolute inset-0 opacity-[0.4]"
+        className="absolute inset-0 opacity-50"
         style={{
-          background: "radial-gradient(circle at 50% 50%, rgba(200,200,200,0.05) 0%, rgba(0,0,0,0.03) 100%)",
+          background: "radial-gradient(circle at 50% 50%, rgba(200,200,200,0.1) 0%, rgba(0,0,0,0.02) 100%)",
         }}
       />
     </div>

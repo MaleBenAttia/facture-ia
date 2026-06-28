@@ -149,3 +149,11 @@ Lors du test de l'application via un réseau local (`192.168.x.x`) ou un VPN (co
 2. **Le blocage de `crypto.randomUUID()` hors HTTPS :**
    Les navigateurs modernes désactivent les API cryptographiques (`crypto.randomUUID`) lorsque la connexion n'est pas sécurisée (tout ce qui n'est pas `https://` ou `localhost`). L'application plantait silencieusement au moment de sauvegarder l'historique sur IP locale, déclenchant une fausse erreur de "Timeout serveur".
    **Solution implémentée :** Utilisation d'un générateur d'identifiant unique (UUID) alternatif fonctionnant sur les contextes non-sécurisés (HTTP simple).
+
+---
+
+## 🎨 Évolutions de l'Interface Utilisateur (UI)
+
+- **Refonte de la page d'accueil :** Suppression de la section "Hero" (images de démonstration) pour afficher directement le cœur de l'application (le scanner) en plein écran, rendant l'outil plus immédiat et productif.
+- **Background animé :** Mise en place d'un fond dynamique subtil (icônes flottantes) avec correction de l'ordre d'empilement (z-index) et ajustement des couleurs pour être parfaitement lisible sur le thème clair.
+- **Nettoyage des assets :** Suppression de toutes les images statiques devenues obsolètes pour alléger le projet.
