@@ -183,21 +183,21 @@ export function ScanZone({ onFileReady, onScanConfirm, etat, progression, fichie
                 </div>
               </div>
               
-              <div className="flex w-full gap-3">
+              <div className="flex w-full gap-3 mt-4">
                 <button
                   onClick={(e) => { e.stopPropagation(); onAnnuler?.(); }}
-                  className="flex-1 py-2.5 rounded-lg text-sm font-bold transition-all hover:bg-black/5"
-                  style={{ color: "var(--color-text)", border: "1px solid rgba(0,0,0,0.1)" }}
+                  className="flex-1 py-3 rounded-xl text-sm font-extrabold transition-all hover:bg-white/60 hover:shadow-sm"
+                  style={{ color: "var(--color-text)", border: "1px solid rgba(0,0,0,0.06)", backgroundColor: "rgba(255,255,255,0.4)" }}
                 >
                   Annuler
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); onScanConfirm?.(); }}
-                  className="flex-1 py-2.5 rounded-lg text-sm font-bold text-white shadow-md transition-all hover:opacity-90 flex items-center justify-center gap-2"
-                  style={{ backgroundColor: "#E63946" }}
+                  className="flex-1 py-3 rounded-xl text-sm font-extrabold text-white shadow-lg shadow-red-500/25 transition-all hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2"
+                  style={{ background: "linear-gradient(135deg, #E63946, #c62435)", border: "1px solid rgba(255,255,255,0.15)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.2), 0 8px 16px rgba(230,57,70,0.25)" }}
                 >
                   <ScanLine className="h-4 w-4" />
-                  Scanner
+                  Scanner ce document
                 </button>
               </div>
             </motion.div>
