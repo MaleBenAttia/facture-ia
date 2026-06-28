@@ -1,0 +1,36 @@
+# ─── Python ───────────────────────────────────────────
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ─── Variables d'environnement (SECRETS — ne jamais committer) ────
+.env
+.env.*
+!.env.example
+
+# ─── Fichiers générés par l'application ───────────────
+uploads/
+outputs/
+
+# ─── Node.js / Frontend ───────────────────────────────
+node_modules/
+frontend/node_modules/
+
+# ─── Logs & caches ────────────────────────────────────
+*.log
+.cache/
+.DS_Store
+Thumbs.db
+
+# ─── IDE ──────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.user
