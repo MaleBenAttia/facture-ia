@@ -69,43 +69,23 @@ CHAMPS A EXTRAIRE :
 - remarques : notes de bas de page, conditions de paiement ("paiement fin du mois", "sous 30 jours"),
   escomptes, penalites de retard, mentions legales. Concatene tout en une seule chaine. null si absent.
 - matricule_fiscal : cherche "M.F", "MF", "NIF", "Matricule", "ICE", "SIRET", "SIREN".
-- rc, ai, compte_bancaire : extraire si presents.
-- champs_supplementaires : tout champ visible non couvert par le schema.
+- societe_tel / societe_email : Extraire le contact principal. S'il y a PLUSIEURS numéros ou emails, place les autres EXCLUSIVEMENT dans `champs_supplementaires` avec des clés explicites (ex: "gsm1", "gsm2", "fixe", "email2").
+- champs_supplementaires : tout champ visible non couvert par le schema (dont les numéros/emails supplémentaires).
 
 ════════════════════════════════════════
-PARTIE 2 — ANALYSE ET ALERTES
+PARTIE 2 — ANALYSE MATHEMATIQUE
 ════════════════════════════════════════
 
-Apres extraction, effectue une analyse professionnelle et retourne un bloc "analyse".
+Apres extraction, effectue une verification STRICTEMENT MATHEMATIQUE. 
+NE FAIS AUCUN COMMENTAIRE sur la conformite, les matricules, ou les noms generiques.
 
-ALERTES A GENERER (type "erreur", "avertissement", ou "info") :
-
-1. PRIX ANORMAUX : compare chaque prix unitaire au contexte du pays et du produit.
-   - Si un prix depasse 10x le prix marche habituel pour ce type de produit/service dans ce pays → erreur.
-   - Exemples de seuils selon devise detectee :
-     * TND : une impression A4 > 5 DT, un stylo > 10 DT, un PC > 5000 DT → suspects
-     * EUR : prestation > 10 000 EUR sans detail → avertissement
-     * DZD : materiel de bureau > 500 000 DZD → verifier
-   - Si un prix_u_ht est negatif (hors remise) → erreur critique
-   - Si total_ttc < total_ht → erreur de calcul
-
-2. INCOHERENCES MATHEMATIQUES :
-   - Verifie : total_ht + montant_tva + timbre_fiscal ≈ net_a_payer (tolerance 1%)
-   - Verifie par ligne : quantite * prix_u_ht * (1 - remise/100) * (1 + tva/100) ≈ total_ttc
-   - Signale toute incoherence chiffree avec les valeurs observees.
-
-3. QUALITE ET CONFORMITE :
-   - Facture sans numero → avertissement
-   - Facture sans date → avertissement
-   - Facture sans societe_nom → avertissement
-   - Societe sans matricule_fiscal (dans pays ou c'est obligatoire comme Tunisie, Algerie) → info
-   - Montant en lettres present mais ne correspond pas au net_a_payer chiffre → erreur
-
-4. OBSERVATIONS UTILES (type "info") :
-   - Devise detectee et pays probable
-   - Si facture proforma (non definitive) → info
-   - Si avoir (credit) → info sur le sens du flux
-   - Si paiement a terme detecte (ex: "fin du mois") → rappel de la date estimee si possible
+REGLE DES ALERTES :
+1. Verifie l'addition : total_ht + montant_tva + timbre_fiscal ≈ net_a_payer (tolerance 1%)
+2. Verifie les lignes : quantite * prix_u_ht * (1 - remise/100) * (1 + tva/100) ≈ total_ttc
+3. Si TOUT EST CORRECT, genere EXACTEMENT UNE SEULE alerte de type "success" : 
+   {"type": "success", "message": "Calculs vérifiés et corrects."}
+4. S'il y a une ERREUR DE CALCUL, genere une alerte de type "erreur" tres courte (2 lignes max) indiquant la difference exacte. 
+   Exemple : {"type": "erreur", "message": "Erreur Total : le calcul donne 101 DT mais la facture affiche 100 DT. Difference de 1 DT."}
 
 FORMAT JSON FINAL :
 {

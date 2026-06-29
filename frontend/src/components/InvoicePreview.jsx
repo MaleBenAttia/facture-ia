@@ -31,29 +31,32 @@ const ALERTE_STYLES = {
   erreur:        { bg: "rgba(220,38,38,0.08)",  border: "rgba(220,38,38,0.3)",  text: "#dc2626", Icon: XCircle },
   avertissement: { bg: "rgba(234,179,8,0.08)",  border: "rgba(234,179,8,0.35)", text: "#b45309", Icon: AlertTriangle },
   info:          { bg: "rgba(59,130,246,0.07)", border: "rgba(59,130,246,0.25)",text: "#2563eb", Icon: Info },
+  success:       { bg: "rgba(22,163,74,0.07)",  border: "rgba(22,163,74,0.25)", text: "#16a34a", Icon: CheckCircle2 },
 };
 
 function AlertsBanner({ analyse }) {
   if (!analyse) return null;
   const alertes = analyse.alertes?.filter(a => a?.message) ?? [];
-  const localisation = [analyse.pays_detecte, analyse.ville_detecte].filter(Boolean).join(" — ");
   const devise = analyse.devise_detecte;
+
+  // Séparer les erreurs/avertissements des succès
+  const problems = alertes.filter(a => a.type !== "success" && a.type !== "info");
+  const success  = alertes.filter(a => a.type === "success");
+  const infos    = alertes.filter(a => a.type === "info");
 
   return (
     <div className="space-y-2">
-      {/* Bandeau de contexte géographique */}
-      {(localisation || devise) && (
-        <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold"
-          style={{ backgroundColor: "rgba(59,130,246,0.07)", border: "1px solid rgba(59,130,246,0.2)", color: "#2563eb" }}>
+      {/* Bandeau devise en petit, discret */}
+      {devise && (
+        <div className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-semibold"
+          style={{ backgroundColor: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.15)", color: "#2563eb" }}>
           <Globe className="h-3.5 w-3.5 shrink-0" />
-          <span>
-            {localisation && <>{localisation}&nbsp;&nbsp;</>}
-            {devise && <>· Devise détectée : <strong>{devise}</strong></>}
-          </span>
+          <span>Devise détectée : <strong>{devise}</strong></span>
         </div>
       )}
-      {/* Alertes */}
-      {alertes.map((alerte, i) => {
+
+      {/* Erreurs et avertissements uniquement */}
+      {problems.map((alerte, i) => {
         const style = ALERTE_STYLES[alerte.type] ?? ALERTE_STYLES.info;
         const { Icon } = style;
         return (
@@ -64,6 +67,15 @@ function AlertsBanner({ analyse }) {
           </div>
         );
       })}
+
+      {/* Message "tout est correct" seulement si aucune erreur */}
+      {problems.length === 0 && success.length > 0 && (
+        <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm"
+          style={{ backgroundColor: "rgba(22,163,74,0.07)", border: "1px solid rgba(22,163,74,0.25)" }}>
+          <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: "#16a34a" }} />
+          <span style={{ color: "#16a34a" }} className="font-semibold">Calculs vérifiés et corrects.</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -120,6 +132,13 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
             <Champ label="Matricule fiscal" valeur={f.societe_matricule_fiscal} />
             <Champ label="Téléphone" valeur={f.societe_tel} />
             <Champ label="Email" valeur={f.societe_email} />
+            {f.champs_supplementaires && Object.entries(f.champs_supplementaires).map(([key, value]) => {
+              if (estVide(value) || typeof value === 'object') return null;
+              const motsExclus = ["signature", "fournisseur", "client", "cachet"];
+              if (motsExclus.some(mot => key.toLowerCase().includes(mot))) return null;
+              const label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+              return <Champ key={key} label={label} valeur={value} />;
+            })}
           </div>
         </CardContent>
       </Card>

@@ -60,12 +60,27 @@ def json_vers_excel(facture: dict):
         "societe_tel", "societe_email", "total_ht", "montant_tva",
         "timbre_fiscal", "net_a_payer", "mode_reglement", "etat", "remarques", "devise"
     ]
+    
+    # Intégrer les champs supplémentaires dynamiques
+    champs_sup = f.get("champs_supplementaires") or {}
+    champs_sup_keys = [k for k, v in champs_sup.items() if v not in (None, "", -9999, [], {})]
+    
     # Filtrer les colonnes vides (null ou -9999) pour cette facture
     fac_headers = [h for h in fac_headers if f.get(h) not in (None, "", -9999)]
+    
+    # Ajouter les clés supplémentaires à la fin
+    fac_headers.extend(champs_sup_keys)
+    
     write_headers(ws_fac, fac_headers)
     # Ecrire les valeurs en ligne 2
     for col, h in enumerate(fac_headers, 1):
-        ws_fac.cell(2, col, f.get(h))
+        if h in champs_sup_keys:
+            val = champs_sup.get(h)
+            if isinstance(val, (dict, list)):
+                val = str(val)
+            ws_fac.cell(2, col, val)
+        else:
+            ws_fac.cell(2, col, f.get(h))
 
     # --- Feuille Clients ---
     cli_headers = [
