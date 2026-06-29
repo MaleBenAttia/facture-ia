@@ -1,3 +1,9 @@
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Charge le .env depuis le répertoire du projet (avant tout autre import)
+load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=True)
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -5,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from gemini_extractor import extraire_facture
 from excel_generator import json_vers_excel
 from pdf_generator import json_vers_pdf
-import shutil, os, uuid, asyncio
+import shutil, os, uuid, asyncio, threading
 from concurrent.futures import ThreadPoolExecutor
 
 app = FastAPI()
@@ -23,20 +29,51 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/tiff", "image/bmp", "application/pdf"]
 
 # Stockage en mémoire des jobs en cours et terminés
-_jobs: dict = {}
+_jobs:        dict = {}
+_job_cancel:  dict = {}  # job_id -> threading.Event (set = annuler)
 _executor = ThreadPoolExecutor(max_workers=4)
 
 
-def _run_job(job_id: str, path: str):
+def _job_est_annule(job_id: str, cancel_event: threading.Event) -> bool:
+    """Retourne True si le job a ete annule, meme si Gemini repond plus tard."""
+    job = _jobs.get(job_id, {})
+    if cancel_event.is_set() or job.get("status") == "cancelled":
+        cancel_event.set()
+        _jobs[job_id] = {"status": "cancelled"}
+        return True
+    return False
+
+
+def _run_job(job_id: str, path: str, cancel_event: threading.Event):
     """Exécuté dans un thread séparé : extraction Gemini + Excel + PDF."""
     short = job_id[:8]
     print(f"\n[JOB {short}] Démarrage traitement...")
     try:
-        result = extraire_facture(path)
+        # Vérifie l'annulation AVANT l'appel Gemini (long)
+        if _job_est_annule(job_id, cancel_event):
+            print(f"[JOB {short}] ⏹️  Annulé avant appel Gemini.")
+            return
+
+        result = extraire_facture(path, cancel_event)
+
+        # Vérifie l'annulation après la réponse Gemini
+        if _job_est_annule(job_id, cancel_event):
+            print(f"[JOB {short}] ⏹️  Annulé après réponse Gemini — résultat ignoré.")
+            return
+
         print(f"[JOB {short}] Gemini OK — génération Excel...")
+        if _job_est_annule(job_id, cancel_event):
+            print(f"[JOB {short}] Annule avant generation Excel - resultat ignore.")
+            return
         excel_filename = os.path.basename(json_vers_excel(result))
+        if _job_est_annule(job_id, cancel_event):
+            print(f"[JOB {short}] Annule apres generation Excel - resultat ignore.")
+            return
         print(f"[JOB {short}] Excel OK — génération PDF...")
         pdf_filename   = os.path.basename(json_vers_pdf(result))
+        if _job_est_annule(job_id, cancel_event):
+            print(f"[JOB {short}] Annule apres generation PDF - resultat ignore.")
+            return
         _jobs[job_id] = {
             "status": "done",
             "data": result,
@@ -45,11 +82,17 @@ def _run_job(job_id: str, path: str):
         }
         print(f"[JOB {short}] ✅ TERMINÉ — résultat disponible sur l'appareil")
     except Exception as exc:
-        _jobs[job_id] = {"status": "error", "detail": str(exc)}
-        print(f"[JOB {short}] ❌ ERREUR : {exc}")
+        if cancel_event.is_set():
+            _jobs[job_id] = {"status": "cancelled"}
+            print(f"[JOB {short}] ⏹️  Annulé (exception interceptée après annulation).")
+        else:
+            _jobs[job_id] = {"status": "error", "detail": str(exc)}
+            print(f"[JOB {short}] ❌ ERREUR : {exc}")
     finally:
         if os.path.exists(path):
             os.remove(path)
+        _job_cancel.pop(job_id, None)  # libère la mémoire
+
 
 
 @app.get("/health")
@@ -69,17 +112,35 @@ async def process(file: UploadFile = File(...)):
     with open(path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
+    # Crée un event d'annulation propre à ce job
+    cancel_event = threading.Event()
+    _job_cancel[job_id] = cancel_event
     _jobs[job_id] = {"status": "processing"}
 
     # Lancer le traitement dans un thread sans bloquer le serveur
     loop = asyncio.get_event_loop()
-    loop.run_in_executor(_executor, _run_job, job_id, path)
+    loop.run_in_executor(_executor, _run_job, job_id, path, cancel_event)
 
     return JSONResponse({"job_id": job_id})
+
+@app.delete("/cancel/{job_id}")
+def cancel(job_id: str):
+    """Annule un job en cours. Si déjà terminé, n'a aucun effet."""
+    event = _job_cancel.get(job_id)
+    if event:
+        event.set()  # signal d'arrêt au thread
+        _jobs[job_id] = {"status": "cancelled"}
+        print(f"[CANCEL] Job {job_id[:8]} — signal d'annulation envoyé.")
+        return {"cancelled": True}
+    # Job déjà terminé ou inexistant : pas d'erreur, on renvoie l'état actuel
+    job = _jobs.get(job_id)
+    return {"cancelled": False, "status": job.get("status") if job else "not_found"}
+
 
 
 @app.get("/status/{job_id}")
 def status(job_id: str):
+
     """Poll léger : retourne uniquement le statut + noms de fichiers (pas les données complètes)."""
     job = _jobs.get(job_id)
     if job is None or job.get("status") == "not_found":

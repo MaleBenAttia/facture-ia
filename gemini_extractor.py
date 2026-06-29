@@ -1,14 +1,38 @@
 from google import genai
 from google.genai import types
 import json, os
+from pathlib import Path
 from datetime import date, datetime
 from dotenv import load_dotenv
 import mimetypes
-load_dotenv()
+
+# Charge le .env depuis le répertoire du fichier lui-même (indépendant du cwd)
+_ENV_PATH = Path(__file__).resolve().parent / ".env"
+load_dotenv(dotenv_path=_ENV_PATH, override=True)
 
 QUOTA_JOUR   = 1500
 QUOTA_MINUTE = 10
 FICHIER      = "usage_counter.json"
+
+# ─── CLÉS API AVEC FALLBACK ────────────────────────────────────────────────
+# Charge les deux clés (rétrocompatible : si KEY1 absent, tente GEMINI_API_KEY)
+GEMINI_API_KEYS = [
+    k for k in [
+        os.getenv("GEMINI_API_KEY1"),
+        os.getenv("GEMINI_API_KEY2"),
+        os.getenv("GEMINI_API_KEY"),   # ancienne clé unique (fallback final)
+    ] if k
+]
+if not GEMINI_API_KEYS:
+    raise EnvironmentError("Aucune clé API Gemini trouvée dans le fichier .env ! "
+                           "Définissez GEMINI_API_KEY1 et/ou GEMINI_API_KEY2.")
+
+# Log de démarrage : confirme le chargement des clés (masquées)
+print(f"[GEMINI] {len(GEMINI_API_KEYS)} clé(s) API chargée(s) :", end=" ")
+for i, k in enumerate(GEMINI_API_KEYS, 1):
+    print(f"Clé{i}=...{k[-6:]}", end="  ")
+print()
+
 
 PRIX_INPUT_PAR_MILLION    = 0.075
 PRIX_OUTPUT_PAR_MILLION   = 0.30
@@ -32,11 +56,53 @@ def sauver_compteur(data):
     with open(FICHIER, "w") as f:
         json.dump(data, f)
 
-def extraire_facture(image_path: str) -> dict:
-    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+def _appeler_gemini(api_key: str, image_data: bytes, mime_type: str, prompt: str):
+    """Effectue un appel Gemini avec la clé fournie. Lève une exception si erreur."""
+    # Guard explicite : détecte les clés None/vides avant l'appel SDK
+    if not api_key or not api_key.strip():
+        raise ValueError(
+            "api_key est vide ou None. Vérifiez GEMINI_API_KEY1 / GEMINI_API_KEY2 dans .env"
+        )
+    client = genai.Client(api_key=api_key.strip())
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=[
+            types.Part.from_bytes(data=image_data, mime_type=mime_type),
+            prompt
+        ]
+    )
+    return response
+
+
+def extraire_facture(image_path: str, cancel_event=None) -> dict:
+    # ── Rechargement dynamique du .env (sécurité si le module est importé tôt)
+    load_dotenv(dotenv_path=_ENV_PATH, override=True)
+
+    # Relit les clés à chaque appel pour être sûr d'avoir les valeurs actuelles
+    cles_actives = [
+        k for k in [
+            os.getenv("GEMINI_API_KEY1"),
+            os.getenv("GEMINI_API_KEY2"),
+            os.getenv("GEMINI_API_KEY"),
+        ] if k and k.strip()
+    ]
+    if not cles_actives:
+        raise EnvironmentError(
+            f"Aucune clé API trouvée dans {_ENV_PATH}. "
+            "Définissez GEMINI_API_KEY1 et/ou GEMINI_API_KEY2."
+        )
+    print(f"  [API] {len(cles_actives)} clé(s) disponibles : "
+          + "  ".join(f"Clé{i}=...{k[-6:]}" for i, k in enumerate(cles_actives, 1)))
+
+    # ── Vérification annulation AVANT lecture du fichier et appel Gemini ─────
+    if cancel_event and cancel_event.is_set():
+        raise InterruptedError("Job annulé par l'utilisateur.")
+
+    # ── Lecture du fichier image ────────────────────────────────────────────
 
     with open(image_path, "rb") as f:
         image_data = f.read()
+    mime_type = mimetypes.guess_type(image_path)[0] or "image/png"
 
     prompt = """
 Tu es un expert-comptable senior et analyste financier specialise dans les factures du Maghreb, d'Europe et du Moyen-Orient.
@@ -149,13 +215,32 @@ FORMAT JSON FINAL :
 """
 
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=[
-            types.Part.from_bytes(data=image_data, mime_type=mimetypes.guess_type(image_path)[0] or "image/png"),
-            prompt
-        ]
-    )
+    # ── Appel avec fallback entre les clés API ─────────────────────────────
+    response      = None
+    api_utilisee  = None
+    erreurs_api   = []
+
+    for index, api_key in enumerate(cles_actives, start=1):
+        try:
+            print(f"\n  [API] Tentative avec la clé n°{index}...")
+            response     = _appeler_gemini(api_key, image_data, mime_type, prompt)
+            api_utilisee = index
+            print(f"  [API] ✅ Clé n°{index} a répondu avec succès.")
+            break
+        except Exception as e:
+            msg = f"Clé n°{index} → {type(e).__name__}: {e}"
+            erreurs_api.append(msg)
+            print(f"  [API] ❌ {msg}")
+            if index < len(cles_actives):
+                print(f"  [API] Basculement sur la clé n°{index + 1}...")
+
+    if response is None:
+        detail = " | ".join(erreurs_api)
+        raise RuntimeError(
+            f"Toutes les clés API ont échoué ({len(cles_actives)} clé(s) testée(s)). "
+            f"Détails : {detail}"
+        )
+
 
     usage = response.usage_metadata
     tokens_input    = usage.prompt_token_count
@@ -180,7 +265,11 @@ FORMAT JSON FINAL :
     restant_minute = QUOTA_MINUTE - compteur["requetes_minute"]
 
     print("\n=============================")
-    print("   TOKENS CETTE REQUETE")
+    print(f"   TOKENS CETTE REQUETE  (API clé n°{api_utilisee})")
+    if len(erreurs_api) > 0:
+        print(f"   ⚠️  {len(erreurs_api)} clé(s) ont échoué avant succès")
+        for e in erreurs_api:
+            print(f"      • {e}")
     print("=============================")
     print(f"  Input    : {tokens_input:,} tokens")
     print(f"  Thinking : {tokens_thinking:,} tokens")

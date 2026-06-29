@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Navbar } from "./components/Navbar";
 import { ScanZone } from "./components/ScanZone";
@@ -6,7 +6,7 @@ import { InvoicePreview } from "./components/InvoicePreview";
 import { InvoiceHistory } from "./components/InvoiceHistory";
 import { ToastProvider, useToast } from "./components/ui/Toast";
 import { FloatingIconsBackground } from "./components/FloatingIconsBackground";
-import { traiterFacture, urlExcel, urlPdf, telecharger, ApiError } from "./lib/api";
+import { traiterFacture, annulerJob, urlExcel, urlPdf, telecharger, ApiError } from "./lib/api";
 
 /* Animation d'entrée au scroll pour les sections */
 const fadeUp = {
@@ -46,6 +46,11 @@ function AppContenu() {
   const [historique,    setHistorique]    = useState([]);
   const [selectionneeId,setSelectionneeId]= useState(null);
 
+  // Références pour l'annulation du job en cours
+  const abortCtrlRef = useRef(null);  // AbortController pour stopper le polling
+  const jobIdRef     = useRef(null);  // job_id backend du job en cours
+  const runIdRef     = useRef(0);     // identifie le traitement actif
+
   const handleFichierSelect = useCallback((file) => {
     setFichierActuel(file);
     setEtat("preview");
@@ -56,49 +61,86 @@ function AppContenu() {
   const lancerTraitement = useCallback(async () => {
     if (!fichierActuel) return;
     setEtat("traitement");
-    setProgression(3); // démarre visible, pas à zéro
+    setProgression(3);
+
+    // Crée un AbortController pour pouvoir annuler le fetch/polling
+    const ctrl = new AbortController();
+    const runId = runIdRef.current + 1;
+    runIdRef.current = runId;
+    abortCtrlRef.current = ctrl;
+    jobIdRef.current     = null; // sera rempli par traiterFacture
 
     // Progression simulée : ease-out sur ~6s jusqu'à 94%, puis attend la réponse
-    const DUREE_MS  = 6000; // durée estimée du traitement IA
-    const STEP_MS   = 120;  // mise à jour toutes les 120ms pour un rendu fluide
+    const DUREE_MS  = 6000;
+    const STEP_MS   = 120;
     let elapsed     = 0;
     const interval  = setInterval(() => {
       elapsed += STEP_MS;
       const ratio = Math.min(elapsed / DUREE_MS, 1);
-      const eased = 1 - Math.pow(1 - ratio, 2.5); // ease-out cubique — rapide au début, ralentit vers 94%
-      setProgression(Math.round(3 + eased * 91)); // plage : 3% → 94%
+      const eased = 1 - Math.pow(1 - ratio, 2.5);
+      setProgression(Math.round(3 + eased * 91));
     }, STEP_MS);
 
     try {
-      const reponse = await traiterFacture(fichierActuel);
+      const reponse = await traiterFacture(fichierActuel, ctrl.signal, (jobId) => {
+        if (runIdRef.current === runId && !ctrl.signal.aborted) {
+          jobIdRef.current = jobId;
+        } else {
+          annulerJob(jobId);
+        }
+      });
       clearInterval(interval);
+      if (ctrl.signal.aborted || runIdRef.current !== runId) return;
       setProgression(100);
       setEtat("succes");
       setResultat(reponse);
       
-      // Fallback pour HTTP local/VPN (crypto.randomUUID n'existe que sur HTTPS ou localhost)
       const id = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2);
-      
       const entree = { id, fichier: fichierActuel, ...reponse };
       setHistorique((h) => [entree, ...h]);
       setSelectionneeId(entree.id);
       toast({ variant: "success", title: "Facture analysée", description: "Données extraites avec succès." });
     } catch (err) {
       clearInterval(interval);
+      // Si annulé par l'utilisateur → retour silencieux à l'état preview
+      const annule = err instanceof ApiError && err.status === 0 && err.message.includes("annulé");
+      if (annule) {
+        if (runIdRef.current === runId) {
+          setEtat("preview");
+          setProgression(0);
+        }
+        return;
+      }
       setEtat("erreur");
-      // Diagnostic: afficher le type ET le message exact de l'erreur
       const message = err instanceof ApiError
         ? err.message
         : `[${err?.constructor?.name || "Error"}] ${err?.message || "inconnu"}`;
       toast({ variant: "error", title: "Extraction impossible", description: message });
+    } finally {
+      if (runIdRef.current === runId) {
+        abortCtrlRef.current = null;
+        jobIdRef.current     = null;
+      }
     }
   }, [fichierActuel, toast]);
 
-  const annulerTraitement = useCallback(() => {
+  const annulerTraitement = useCallback(async () => {
+    runIdRef.current += 1;
+    // 1. Stoppe le polling frontend immédiatement
+    if (abortCtrlRef.current) {
+      abortCtrlRef.current.abort();
+      abortCtrlRef.current = null;
+    }
+    // 2. Envoie le signal d'annulation au backend (best-effort)
+    if (jobIdRef.current) {
+      await annulerJob(jobIdRef.current);
+      jobIdRef.current = null;
+    }
     setEtat("attente");
     setFichierActuel(null);
     setProgression(0);
   }, []);
+
 
   const selectionnerHistorique = useCallback((item) => {
     setResultat(item);

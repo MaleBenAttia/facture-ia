@@ -45,9 +45,10 @@ export async function verifierSante() {
 /**
  * Envoie une facture au backend, reçoit un job_id immédiatement,
  * puis poll /status/{job_id} toutes les 2s jusqu'à obtenir le résultat.
- * Cette approche évite les timeouts mobiles sur les longues requêtes.
+ * @param {File} file  - Le fichier à analyser
+ * @param {AbortSignal} signal - Signal pour annuler le polling côté client
  */
-export async function traiterFacture(file) {
+export async function traiterFacture(file, signal, onJobStarted) {
   const formData = new FormData();
   formData.append("file", file);
 
@@ -57,12 +58,15 @@ export async function traiterFacture(file) {
     const res = await fetch(`${API_BASE}/process`, {
       method: "POST",
       body: formData,
+      signal,
     });
     await gererReponse(res);
     const body = await res.json();
     jobId = body.job_id;
+    onJobStarted?.(jobId);
     if (!jobId) throw new ApiError("Réponse inattendue du serveur (pas de job_id)", 500);
   } catch (err) {
+    if (err.name === "AbortError") throw new ApiError("Traitement annulé.", 0);
     if (err instanceof ApiError) throw err;
     throw new ApiError("Impossible de démarrer le traitement", 0);
   }
@@ -73,39 +77,53 @@ export async function traiterFacture(file) {
   const debut = Date.now();
 
   while (Date.now() - debut < MAX_ATTENTE_MS) {
+    // Arrêt immédiat si le signal d'annulation est déclenché
+    if (signal?.aborted) throw new ApiError("Traitement annulé.", 0);
+
     await new Promise((r) => setTimeout(r, INTERVALLE_MS));
+
+    if (signal?.aborted) throw new ApiError("Traitement annulé.", 0);
+
     try {
-      const res = await fetch(`${API_BASE}/status/${jobId}`);
-      if (!res.ok) {
-        // Erreur HTTP passagère (ex: serveur en train de redémarrer) → on réessaie
-        continue;
-      }
+      const res = await fetch(`${API_BASE}/status/${jobId}`, { signal });
+      if (!res.ok) continue;
       const job = await res.json();
 
+      if (job.status === "cancelled") {
+        throw new ApiError("Traitement annulé.", 0);
+      }
       if (job.status === "done") {
         // Étape 3 : récupérer les données complètes dans une requête dédiée
-        // (la réponse /status est légère, les données sont dans /result)
-        const resData = await fetch(`${API_BASE}/result/${jobId}`);
-        if (!resData.ok) {
-          // Si /result échoue, on réessaie au prochain tour
-          continue;
-        }
+        const resData = await fetch(`${API_BASE}/result/${jobId}`, { signal });
+        if (!resData.ok) continue;
         const { data } = await resData.json();
         return { data, excel: job.excel, pdf: job.pdf };
       }
       if (job.status === "error") {
-        // Le serveur a retourné une erreur métier explicite → on échoue
         throw new ApiError(job.detail || "Erreur lors du traitement", 500);
       }
-      // status === "processing" ou "not_found" (serveur redémarré) → on réessaie
+      // status === "processing" ou "not_found" → on réessaie
     } catch (err) {
+      if (err.name === "AbortError" || (err instanceof ApiError && err.status === 0)) throw err;
       if (err instanceof ApiError) throw err;
-      // Erreur réseau passagère (VPN/WiFi instable) → on réessaie silencieusement
+      // Erreur réseau passagère → on réessaie silencieusement
     }
   }
 
   throw new ApiError("Délai d'attente dépassé (3 minutes). Réessayez.", 408);
 }
+
+/**
+ * Envoie un signal d'annulation au backend pour stopper un job en cours.
+ */
+export async function annulerJob(jobId) {
+  try {
+    await fetch(`${API_BASE}/cancel/${jobId}`, { method: "DELETE" });
+  } catch {
+    // Erreur réseau lors de l'annulation : ignorée (best-effort)
+  }
+}
+
 
 /** Construit l'URL de téléchargement pour une feuille Excel donnée. */
 export function urlExcel(sheet) {
