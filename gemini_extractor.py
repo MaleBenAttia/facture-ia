@@ -73,19 +73,19 @@ CHAMPS A EXTRAIRE :
 - champs_supplementaires : tout champ visible non couvert par le schema (dont les numéros/emails supplémentaires).
 
 ════════════════════════════════════════
-PARTIE 2 — ANALYSE MATHEMATIQUE
+PARTIE 2 — VERIFICATION MATHEMATIQUE
 ════════════════════════════════════════
 
-Apres extraction, effectue une verification STRICTEMENT MATHEMATIQUE. 
-NE FAIS AUCUN COMMENTAIRE sur la conformite, les matricules, ou les noms generiques.
+REGLES ABSOLUES - NE PAS DEVIER :
+- Tu dois retourner UN SEUL element dans le tableau "alertes". Pas deux, pas trois. UN SEUL.
+- INTERDIT : commentaires sur les noms, matricules, conformite, TVA globale, labels ambigus, pays, devise, ou quoi que ce soit d'autre que les chiffres.
+- AUTORISE UNIQUEMENT : verifier si total_ht + montant_tva + timbre_fiscal = net_a_payer (tolerance 1%).
 
-REGLE DES ALERTES :
-1. Verifie l'addition : total_ht + montant_tva + timbre_fiscal ≈ net_a_payer (tolerance 1%)
-2. Verifie les lignes : quantite * prix_u_ht * (1 - remise/100) * (1 + tva/100) ≈ total_ttc
-3. Si TOUT EST CORRECT, genere EXACTEMENT UNE SEULE alerte de type "success" : 
-   {"type": "success", "message": "Calculs vérifiés et corrects."}
-4. S'il y a une ERREUR DE CALCUL, genere une alerte de type "erreur" tres courte (2 lignes max) indiquant la difference exacte. 
-   Exemple : {"type": "erreur", "message": "Erreur Total : le calcul donne 101 DT mais la facture affiche 100 DT. Difference de 1 DT."}
+CAS 1 - Tout est correct (ou champs manquants) :
+  alertes: [{"type": "success", "message": "Calculs vérifiés."}]
+
+CAS 2 - Erreur de calcul uniquement :
+  alertes: [{"type": "erreur", "message": "Total attendu : X. Affiché : Y. Écart : Z."}]
 
 FORMAT JSON FINAL :
 {
