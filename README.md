@@ -11,6 +11,8 @@ Système complet et moderne pour scanner une facture (image ou PDF), en extraire
 - **Prétraitement automatique des images** : Correction d'ombre, upscaling adaptatif, rehaussement de contraste (CLAHE), netteté optimisée avant envoi au LLM.
 - **Aperçu instantané** : Dès l'upload, l'image prétraitée est affichée dans l'interface (PDF converti en image visible).
 - **Débogage visuel** : L'image exacte envoyée à Gemini est sauvegardée dans `imagetraiter/`.
+- **Parsing JSON robuste** : Extraction du bloc `{...}`, 2 passes de réparation automatique (virgules, guillemets, clés), fallback avec logs.
+- **Vérification des prix par article et pays** : Le LLM valide la cohérence des montants (ex: stylo en Tunisie → max 5 TND, pneu → 50-300 TND) pour éviter les erreurs de virgule.
 
 ---
 
@@ -125,6 +127,21 @@ Avant d'envoyer une image à Gemini, elle passe par un pipeline adaptatif :
 | **Sharpening** | Toujours | Netteté renforcée (`unsharp mask`) |
 
 L'image finale est encodée en PNG et envoyée à Gemini. Une copie est conservée dans `imagetraiter/derniere_image.png` pour déboguer.
+
+---
+
+## 🛡️ Corrections & Robustesse
+
+| Correctif | Détail |
+|---|---|
+| **Parsing JSON tolérant** | Extraction du bloc `{…}`, correction virgules traînantes, guillemets simples, clés non quotées, `None`/`True` Python → `null`/`true`. |
+| **Validation prix article + pays** | Le LLM vérifie que le montant est cohérent avec la désignation (stylo, pneu…) et le pays (TND, EUR…). Corrige automatiquement la virgule si 100x trop haut. |
+| **Décodage image sécurisé** | `cv2.imdecode` → lève une erreur claire si l'image est corrompue (plus de crash silencieux). |
+| **PDF niveaux de gris** | Gestion des pixmaps à 1 canal (niveaux de gris) dans `pdf_vers_images`. |
+| **Validation PNG** | Vérification que `cv2.imencode` produit bien un PNG valide avant envoi à Gemini. |
+| **Thread safety** | `threading.Lock()` sur les jobs partagés (`_jobs`, `_job_cancel`, compteur d'usage). |
+| **Taille max upload** | Vérification 15 Mo côté backend (HTTP 413 si dépassé). |
+| **Sécurité downloads** | Les endpoints `/excel/` et `/pdf/` vérifient que le fichier appartient à un job terminé. |
 
 ---
 
