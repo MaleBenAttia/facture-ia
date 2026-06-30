@@ -5,12 +5,14 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=True)
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from gemini_extractor import extraire_facture
 from excel_generator import json_vers_excel
 from pdf_generator import json_vers_pdf
+import cv2
+from image_preprocessor import preparer_image_pour_llm
 import shutil, os, uuid, asyncio, threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -46,7 +48,7 @@ def _job_est_annule(job_id: str, cancel_event: threading.Event) -> bool:
     return False
 
 
-def _run_job(job_id: str, path: str, cancel_event: threading.Event):
+def _run_job(job_id: str, path: str, content_type: str, cancel_event: threading.Event):
     """Exécuté dans un thread séparé : extraction Gemini + Excel + PDF."""
     short = job_id[:8]
     print(f"\n[JOB {short}] Démarrage traitement...")
@@ -56,7 +58,7 @@ def _run_job(job_id: str, path: str, cancel_event: threading.Event):
             print(f"[JOB {short}] ⏹️  Annulé avant appel Gemini.")
             return
 
-        result = extraire_facture(path, cancel_event)
+        result = extraire_facture(path, content_type, cancel_event)
 
         # Vérifie l'annulation après la réponse Gemini
         if _job_est_annule(job_id, cancel_event):
@@ -107,6 +109,18 @@ def health():
     return {"status": "ok"}
 
 
+@app.post("/preview")
+async def preview(file: UploadFile = File(...)):
+    if file.content_type not in ALLOWED:
+        raise HTTPException(status_code=400, detail="Format non supporte")
+    contents = await file.read()
+    if len(contents) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="Fichier trop volumineux (max 15 Mo)")
+    img_bgr = preparer_image_pour_llm(contents, file.content_type)
+    _, buffer = cv2.imencode(".png", img_bgr)
+    return Response(content=buffer.tobytes(), media_type="image/png")
+
+
 @app.post("/process")
 async def process(file: UploadFile = File(...)):
     """Démarre le traitement et retourne immédiatement un job_id."""
@@ -132,7 +146,7 @@ async def process(file: UploadFile = File(...)):
 
     # Lancer le traitement dans un thread sans bloquer le serveur
     loop = asyncio.get_event_loop()
-    loop.run_in_executor(_executor, _run_job, job_id, path, cancel_event)
+    loop.run_in_executor(_executor, _run_job, job_id, path, file.content_type, cancel_event)
 
     return JSONResponse({"job_id": job_id})
 

@@ -19,6 +19,7 @@ build/
 uploads/
 outputs/
 usage_counter.json
+imagetraiter/*.png
 
 # ─── Node.js / Frontend ───────────────────────────────
 node_modules/

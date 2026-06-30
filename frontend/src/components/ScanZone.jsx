@@ -14,18 +14,9 @@ const MESSAGES = [
   "Finalisation de l'extraction…",
 ];
 
-export function ScanZone({ onFileReady, onScanConfirm, etat, progression, fichierActuel, onAnnuler }) {
+export function ScanZone({ onFileReady, onScanConfirm, etat, progression, fichierActuel, previewProcessedUrl, onAnnuler }) {
   const [erreurLocale, setErreurLocale] = useState(null);
   const [messageIndex, setMessageIndex] = useState(0);
-  const [previewUrl, setPreviewUrl] = useState(null);
-
-  useEffect(() => {
-    if (fichierActuel && etat === "preview") {
-      const url = URL.createObjectURL(fichierActuel);
-      setPreviewUrl(url);
-      return () => URL.revokeObjectURL(url);
-    }
-  }, [fichierActuel, etat]);
 
   useEffect(() => {
     let interval;
@@ -161,21 +152,21 @@ export function ScanZone({ onFileReady, onScanConfirm, etat, progression, fichie
               exit={{ opacity: 0, scale: 0.95 }}
               className="relative z-10 flex w-full flex-col items-center gap-5 px-2"
             >
-              {/* Aperçu grand format */}
+              {/* Aperçu grand format (image prétraitée ou brut) */}
               <div className="relative w-full rounded-xl overflow-hidden shadow-md" style={{ backgroundColor: "rgba(0,0,0,0.04)", minHeight: "420px" }}>
-                {estPdf ? (
-                  <div className="w-full flex flex-col items-center justify-center py-20">
-                    <FileText className="h-16 w-16 opacity-40 mb-3" style={{ color: "var(--color-text-muted)" }} />
-                    <span className="text-sm font-bold" style={{ color: "var(--color-text)" }}>Document PDF</span>
-                    <span className="text-xs mt-1" style={{ color: "var(--color-text-muted)" }}>{fichierActuel?.name}</span>
-                  </div>
-                ) : (
+                {previewProcessedUrl ? (
                   <img
-                    src={previewUrl}
-                    alt="Aperçu de la facture"
+                    src={previewProcessedUrl}
+                    alt="Aperçu de la facture prétraité"
                     className="w-full h-auto"
                     style={{ maxHeight: "600px", objectFit: "contain" }}
                   />
+                ) : (
+                  <div className="w-full flex flex-col items-center justify-center py-20">
+                    <div className="h-8 w-8 rounded-full border-2 animate-spin mb-3"
+                      style={{ borderColor: "#E63946", borderTopColor: "transparent" }} />
+                    <span className="text-sm font-bold" style={{ color: "var(--color-text)" }}>Prétraitement en cours…</span>
+                  </div>
                 )}
                 {/* Bandeau nom fichier en bas */}
                 <div className="absolute inset-x-0 bottom-0 px-3 py-2 bg-gradient-to-t from-black/50 to-transparent">

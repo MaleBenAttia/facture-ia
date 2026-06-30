@@ -43,6 +43,23 @@ export async function verifierSante() {
 }
 
 /**
+ * Upload le fichier vers /preview, reçoit l'image prétraitée en PNG.
+ * @returns {Promise<Blob>}
+ */
+export async function previsualiserFacture(file, signal) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE}/preview`, {
+    method: "POST",
+    body: formData,
+    signal,
+  });
+  await gererReponse(res);
+  return res.blob();
+}
+
+
+/**
  * Envoie une facture au backend, reçoit un job_id immédiatement,
  * puis poll /status/{job_id} toutes les 2s jusqu'à obtenir le résultat.
  * @param {File} file  - Le fichier à analyser

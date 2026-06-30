@@ -4,7 +4,8 @@ import json, os, threading
 from pathlib import Path
 from datetime import date, datetime
 from dotenv import load_dotenv
-import mimetypes
+import cv2
+from image_preprocessor import preparer_image_pour_llm
 
 # Charge le .env depuis le répertoire du fichier lui-même (indépendant du cwd)
 _ENV_PATH = Path(__file__).resolve().parent / ".env"
@@ -75,7 +76,7 @@ def _appeler_gemini(api_key: str, image_data: bytes, mime_type: str, prompt: str
     return response
 
 
-def extraire_facture(image_path: str, cancel_event=None) -> dict:
+def extraire_facture(image_path: str, content_type: str = "image/png", cancel_event=None) -> dict:
     # ── Rechargement dynamique du .env (sécurité si le module est importé tôt)
     load_dotenv(dotenv_path=_ENV_PATH, override=True)
 
@@ -99,11 +100,25 @@ def extraire_facture(image_path: str, cancel_event=None) -> dict:
     if cancel_event and cancel_event.is_set():
         raise InterruptedError("Job annulé par l'utilisateur.")
 
-    # ── Lecture du fichier image ────────────────────────────────────────────
+    # ── Lecture et préprocessing de l'image ────────────────────────────────
 
     with open(image_path, "rb") as f:
-        image_data = f.read()
-    mime_type = mimetypes.guess_type(image_path)[0] or "image/png"
+        file_bytes = f.read()
+    print(f"  [PREPROC] Fichier original: {len(file_bytes)/1024:.1f} Ko, type: {content_type}")
+    img_bgr = preparer_image_pour_llm(file_bytes, content_type)
+    if img_bgr is None or img_bgr.size == 0:
+        raise ValueError("L'image prétraitée est vide")
+    print(f"  [PREPROC] Image prétraitée: {img_bgr.shape[1]}x{img_bgr.shape[0]} px, encodage PNG...")
+    success, buffer = cv2.imencode(".png", img_bgr)
+    if not success or buffer is None or len(buffer) == 0:
+        raise ValueError("Échec de l'encodage PNG")
+    image_data = buffer.tobytes()
+    mime_type = "image/png"
+    os.makedirs("imagetraiter", exist_ok=True)
+    with open("imagetraiter/derniere_image.png", "wb") as f:
+        f.write(image_data)
+    print(f"  [PREPROC] Image sauvegardée dans imagetraiter/derniere_image.png ({len(image_data)/1024:.1f} Ko)")
+    print(f"  [PREPROC] Envoi à Gemini: {len(image_data)/1024:.1f} Ko (PNG)")
 
     prompt = """
 Tu es un expert-comptable senior et analyste financier specialise dans les factures du Maghreb, d'Europe et du Moyen-Orient.
@@ -302,4 +317,20 @@ FORMAT JSON FINAL :
     if not text:
         raise ValueError("Gemini a retourne une reponse vide")
 
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        import re
+        text = re.sub(r",\s*([}\]])", r"\1", text)
+        text = re.sub(r"'(true|false|null|\d+)'", r"\1", text)
+        text = re.sub(r"'", '"', text)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as e:
+            print(f"  [JSON] Réparation échouée, tentative de récupération manuelle...")
+            import ast
+            text = re.sub(r'([{,])\s*(\w+)\s*:', r'\1"\2":', text)
+            try:
+                return json.loads(text)
+            except:
+                raise ValueError(f"Réponse JSON invalide après réparation: {e}")

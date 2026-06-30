@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Navbar } from "./components/Navbar";
 import { ScanZone } from "./components/ScanZone";
@@ -6,7 +6,7 @@ import { InvoicePreview } from "./components/InvoicePreview";
 import { InvoiceHistory } from "./components/InvoiceHistory";
 import { ToastProvider, useToast } from "./components/ui/Toast";
 import { FloatingIconsBackground } from "./components/FloatingIconsBackground";
-import { traiterFacture, annulerJob, urlExcel, urlPdf, telecharger, ApiError } from "./lib/api";
+import { traiterFacture, annulerJob, urlExcel, urlPdf, telecharger, previsualiserFacture, ApiError } from "./lib/api";
 
 /* Animation d'entrée au scroll pour les sections */
 const fadeUp = {
@@ -38,24 +38,40 @@ function SectionHead({ color = "#E63946", label }) {
 function AppContenu() {
   const { toast } = useToast();
 
-  const [etat,          setEtat]          = useState("attente");
-  const [progression,   setProgression]   = useState(0);
-  const [fichierActuel, setFichierActuel] = useState(null);
-  const [resultat,      setResultat]      = useState(null);
-  const [telechargement,setTelechargement]= useState(null);
-  const [historique,    setHistorique]    = useState([]);
-  const [selectionneeId,setSelectionneeId]= useState(null);
+  const [etat,                setEtat]                = useState("attente");
+  const [progression,         setProgression]         = useState(0);
+  const [fichierActuel,       setFichierActuel]       = useState(null);
+  const [previewProcessedUrl, setPreviewProcessedUrl] = useState(null);
+  const [resultat,            setResultat]            = useState(null);
+  const [telechargement,      setTelechargement]      = useState(null);
+  const [historique,          setHistorique]          = useState([]);
+  const [selectionneeId,      setSelectionneeId]      = useState(null);
+
+  // Nettoie l'URL du preview quand elle change ou au démontage
+  useEffect(() => {
+    return () => {
+      if (previewProcessedUrl) URL.revokeObjectURL(previewProcessedUrl);
+    };
+  }, [previewProcessedUrl]);
 
   // Références pour l'annulation du job en cours
   const abortCtrlRef = useRef(null);  // AbortController pour stopper le polling
   const jobIdRef     = useRef(null);  // job_id backend du job en cours
   const runIdRef     = useRef(0);     // identifie le traitement actif
 
-  const handleFichierSelect = useCallback((file) => {
+  const handleFichierSelect = useCallback(async (file) => {
     setFichierActuel(file);
     setEtat("preview");
     setResultat(null);
     setProgression(0);
+    setPreviewProcessedUrl(null);
+    try {
+      const blob = await previsualiserFacture(file);
+      const url = URL.createObjectURL(blob);
+      setPreviewProcessedUrl(url);
+    } catch {
+      // fallback : on affiche l'aperçu brut si le preprocessing échoue
+    }
   }, []);
 
   const lancerTraitement = useCallback(async () => {
@@ -226,6 +242,7 @@ function AppContenu() {
                   etat={etat}
                   progression={progression}
                   fichierActuel={fichierActuel}
+                  previewProcessedUrl={previewProcessedUrl}
                   onFileReady={handleFichierSelect}
                   onScanConfirm={lancerTraitement}
                   onAnnuler={annulerTraitement}
