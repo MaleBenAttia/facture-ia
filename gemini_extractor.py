@@ -329,20 +329,30 @@ FORMAT JSON FINAL :
     if not text:
         raise ValueError("Gemini a retourne une reponse vide")
 
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        import re
-        text = re.sub(r",\s*([}\]])", r"\1", text)
-        text = re.sub(r"'(true|false|null|\d+)'", r"\1", text)
-        text = re.sub(r"'", '"', text)
+    # Extrait l'objet JSON entre { et } (ignore texte avant/apres)
+    debut = text.find("{")
+    fin = text.rfind("}")
+    if debut != -1 and fin != -1 and fin > debut:
+        text = text[debut:fin+1]
+    text = text.strip()
+
+    import re
+
+    def reparer_json(t):
+        t = re.sub(r",\s*([}\]])", r"\1", t)
+        t = re.sub(r"'", '"', t)
+        t = re.sub(r"\bNone\b", "null", t)
+        t = re.sub(r"\bTrue\b", "true", t)
+        t = re.sub(r"\bFalse\b", "false", t)
+        t = re.sub(r"([{,])\s*(\w+)\s*:", r'\1"\2":', t)
+        t = re.sub(r'"\s+', '"', t)
+        return t
+
+    for _ in range(2):
         try:
             return json.loads(text)
-        except json.JSONDecodeError as e:
-            print(f"  [JSON] Réparation échouée, tentative de récupération manuelle...")
-            import ast
-            text = re.sub(r'([{,])\s*(\w+)\s*:', r'\1"\2":', text)
-            try:
-                return json.loads(text)
-            except:
-                raise ValueError(f"Réponse JSON invalide après réparation: {e}")
+        except json.JSONDecodeError:
+            text = reparer_json(text)
+
+    print(f"  [JSON] ÉCHEC — contenu brut (premiers 500c) : {text[:500]}")
+    raise ValueError(f"Réponse JSON invalide après réparation.")
