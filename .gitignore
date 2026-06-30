@@ -18,6 +18,7 @@ build/
 # ─── Fichiers générés par l'application ───────────────
 uploads/
 outputs/
+usage_counter.json
 
 # ─── Node.js / Frontend ───────────────────────────────
 node_modules/

@@ -32,15 +32,17 @@ ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/tiff", "image/bmp", "
 _jobs:        dict = {}
 _job_cancel:  dict = {}  # job_id -> threading.Event (set = annuler)
 _executor = ThreadPoolExecutor(max_workers=4)
+jobs_lock = threading.Lock()
+MAX_FILE_SIZE = 15 * 1024 * 1024
 
 
 def _job_est_annule(job_id: str, cancel_event: threading.Event) -> bool:
-    """Retourne True si le job a ete annule, meme si Gemini repond plus tard."""
-    job = _jobs.get(job_id, {})
-    if cancel_event.is_set() or job.get("status") == "cancelled":
-        cancel_event.set()
-        _jobs[job_id] = {"status": "cancelled"}
-        return True
+    with jobs_lock:
+        job = _jobs.get(job_id, {})
+        if cancel_event.is_set() or job.get("status") == "cancelled":
+            cancel_event.set()
+            _jobs[job_id] = {"status": "cancelled"}
+            return True
     return False
 
 
@@ -74,24 +76,29 @@ def _run_job(job_id: str, path: str, cancel_event: threading.Event):
         if _job_est_annule(job_id, cancel_event):
             print(f"[JOB {short}] Annule apres generation PDF - resultat ignore.")
             return
-        _jobs[job_id] = {
-            "status": "done",
-            "data": result,
-            "excel": excel_filename,
-            "pdf":   pdf_filename,
-        }
+        with jobs_lock:
+            _jobs[job_id] = {
+                "status": "done",
+                "data": result,
+                "excel": excel_filename,
+                "pdf":   pdf_filename,
+            }
         print(f"[JOB {short}] ✅ TERMINÉ — résultat disponible sur l'appareil")
     except Exception as exc:
+        with jobs_lock:
+            if cancel_event.is_set():
+                _jobs[job_id] = {"status": "cancelled"}
+            else:
+                _jobs[job_id] = {"status": "error", "detail": str(exc)}
         if cancel_event.is_set():
-            _jobs[job_id] = {"status": "cancelled"}
             print(f"[JOB {short}] ⏹️  Annulé (exception interceptée après annulation).")
         else:
-            _jobs[job_id] = {"status": "error", "detail": str(exc)}
             print(f"[JOB {short}] ❌ ERREUR : {exc}")
     finally:
         if os.path.exists(path):
             os.remove(path)
-        _job_cancel.pop(job_id, None)  # libère la mémoire
+        with jobs_lock:
+            _job_cancel.pop(job_id, None)
 
 
 
@@ -106,16 +113,22 @@ async def process(file: UploadFile = File(...)):
     if file.content_type not in ALLOWED:
         raise HTTPException(status_code=400, detail="Format non supporte")
 
+    file.file.seek(0, 2)
+    size = file.file.tell()
+    file.file.seek(0)
+    if size > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="Fichier trop volumineux (max 15 Mo)")
+
     job_id = str(uuid.uuid4())
     path   = f"{UPLOAD_DIR}/{job_id}_{file.filename}"
 
     with open(path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    # Crée un event d'annulation propre à ce job
     cancel_event = threading.Event()
-    _job_cancel[job_id] = cancel_event
-    _jobs[job_id] = {"status": "processing"}
+    with jobs_lock:
+        _job_cancel[job_id] = cancel_event
+        _jobs[job_id] = {"status": "processing"}
 
     # Lancer le traitement dans un thread sans bloquer le serveur
     loop = asyncio.get_event_loop()
@@ -125,44 +138,50 @@ async def process(file: UploadFile = File(...)):
 
 @app.delete("/cancel/{job_id}")
 def cancel(job_id: str):
-    """Annule un job en cours. Si déjà terminé, n'a aucun effet."""
-    event = _job_cancel.get(job_id)
-    if event:
-        event.set()  # signal d'arrêt au thread
-        _jobs[job_id] = {"status": "cancelled"}
-        print(f"[CANCEL] Job {job_id[:8]} — signal d'annulation envoyé.")
-        return {"cancelled": True}
-    # Job déjà terminé ou inexistant : pas d'erreur, on renvoie l'état actuel
-    job = _jobs.get(job_id)
-    return {"cancelled": False, "status": job.get("status") if job else "not_found"}
+    with jobs_lock:
+        event = _job_cancel.get(job_id)
+        if event:
+            event.set()
+            _jobs[job_id] = {"status": "cancelled"}
+            print(f"[CANCEL] Job {job_id[:8]} — signal d'annulation envoyé.")
+            return {"cancelled": True}
+        job = _jobs.get(job_id)
+        return {"cancelled": False, "status": job.get("status") if job else "not_found"}
 
 
 
 @app.get("/status/{job_id}")
 def status(job_id: str):
-
-    """Poll léger : retourne uniquement le statut + noms de fichiers (pas les données complètes)."""
-    job = _jobs.get(job_id)
+    with jobs_lock:
+        job = _jobs.get(job_id)
     if job is None or job.get("status") == "not_found":
         return {"status": "not_found"}
     if job["status"] == "done":
-        # Réponse légère : pas les données, juste les noms de fichiers
         return {"status": "done", "excel": job["excel"], "pdf": job["pdf"]}
-    # processing ou error
     return {k: v for k, v in job.items() if k != "data"}
 
 
 @app.get("/result/{job_id}")
 def result(job_id: str):
-    """Retourne les données complètes d'un job terminé."""
-    job = _jobs.get(job_id)
+    with jobs_lock:
+        job = _jobs.get(job_id)
     if job is None or job.get("status") != "done":
         raise HTTPException(status_code=404, detail="Résultat non disponible")
     return {"data": job["data"]}
 
 
+def _fichier_appartient_a_un_job(filename: str) -> bool:
+    with jobs_lock:
+        return any(
+            job.get("status") == "done" and (job.get("excel") == filename or job.get("pdf") == filename)
+            for job in _jobs.values()
+        )
+
+
 @app.get("/excel/{filename}")
 def download_excel(filename: str):
+    if not _fichier_appartient_a_un_job(filename):
+        raise HTTPException(status_code=404, detail="Fichier non disponible")
     path = f"outputs/{filename}"
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="Fichier Excel non trouve")
@@ -175,6 +194,8 @@ def download_excel(filename: str):
 
 @app.get("/pdf/{filename}")
 def download_pdf(filename: str):
+    if not _fichier_appartient_a_un_job(filename):
+        raise HTTPException(status_code=404, detail="Fichier non disponible")
     path = f"outputs/{filename}"
     if not os.path.exists(path):
         raise HTTPException(status_code=404, detail="PDF non trouve")

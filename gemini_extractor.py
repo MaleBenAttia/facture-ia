@@ -1,6 +1,6 @@
 from google import genai
 from google.genai import types
-import json, os
+import json, os, threading
 from pathlib import Path
 from datetime import date, datetime
 from dotenv import load_dotenv
@@ -13,6 +13,7 @@ load_dotenv(dotenv_path=_ENV_PATH, override=True)
 QUOTA_JOUR   = 1500
 QUOTA_MINUTE = 10
 FICHIER      = "usage_counter.json"
+compteur_lock = threading.Lock()
 
 # ─── CLÉS API AVEC FALLBACK ────────────────────────────────────────────────
 # Charge les deux clés (rétrocompatible : si KEY1 absent, tente GEMINI_API_KEY)
@@ -254,12 +255,13 @@ FORMAT JSON FINAL :
         (tokens_thinking / 1_000_000) * PRIX_THINKING_PAR_MILLION
     )
 
-    compteur = lire_compteur()
-    compteur["requetes_jour"]   += 1
-    compteur["requetes_minute"] += 1
-    compteur["tokens_jour"]     += tokens_total
-    compteur["cout_jour"]       += cout_requete
-    sauver_compteur(compteur)
+    with compteur_lock:
+        compteur = lire_compteur()
+        compteur["requetes_jour"]   += 1
+        compteur["requetes_minute"] += 1
+        compteur["tokens_jour"]     += tokens_total
+        compteur["cout_jour"]       += cout_requete
+        sauver_compteur(compteur)
 
     restant_jour   = QUOTA_JOUR   - compteur["requetes_jour"]
     restant_minute = QUOTA_MINUTE - compteur["requetes_minute"]
