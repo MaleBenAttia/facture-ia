@@ -144,15 +144,17 @@ Analyse tous les indices : langue, ville, code postal, mentions legales, matricu
 - Si aucun indice : deduis depuis le format des montants (dernier separateur = decimale)
 IMPORTANT : si devise TND, le point dans les montants est TOUJOURS decimal, jamais separateur de milliers.
 
-VERIFICATION PRIX RAISONNABLE (critique) :
-- Un article courant (stylo, bouteille, piece detachee) ne peut pas couter des milliers de dinars/dollars/euros.
-  Si un total_ht_ligne, prix_u_ht ou net_a_payer semble absurde, verifie la position du separateur decimal.
-  EXEMPLE : 7.411 TND = 7 dinars et 411 millimes (correct). 7411 TND ou 7411.0 TND = ABSURDE pour un article normal.
-- TND (Tunisie) : max 999.999 par ligne sauf facture de gros. 3 decimales toujours.
-- DZD (Algerie) : max 999999.99 par ligne. 2 decimales.
-- MAD (Maroc) : max 999999.99 par ligne. 2 decimales.
-- EUR : max 99999.99 par ligne.
-- Si le prix extrait est absurde (ex: 7411 DT), rapproche-le du prix visuel sur la facture avant d'ecrire le JSON.
+VERIFICATION PRIX RAISONNABLE SELON ARTICLE ET PAYS (critique) :
+- Analyse le designation de chaque ligne et verifie que le prix_u_ht est coherent avec l'article ET le pays.
+  EXEMPLE : "Stylo" en Tunisie → 0.5 a 5 TND max. "Pneu" en Tunisie → 50 a 300 TND.
+- Si le prix extrait est absurde pour l'article detecte, c'est que le separateur decimal est mal interprete.
+  EXEMPLE : 7.411 TND sur une bouteille → 7.411 TND (correct, 7 dinars 411 millimes).
+  7411 TND sur une bouteille → ABSURDE, le point est decimal : c'est 7.411 TND, pas 7411.
+- TND (Tunisie) : 3 decimales. 1 DT = 1000 millimes. Ex: 7.411 = 7 dinars 411 millimes.
+- DZD (Algerie) : 2 decimales. Ex: 150.50 DA.
+- MAD (Maroc) : 2 decimales. Ex: 85.00 DH.
+- EUR : 2 decimales. Ex: 12.99 €.
+- Si le prix semble 100x ou 1000x trop eleve pour l'article, corrige automatiquement la position de la virgule.
 
 CHAMPS A EXTRAIRE :
 - type_facture : "Facture", "Proforma", "Avoir", "Bon de livraison", "Devis", etc.
