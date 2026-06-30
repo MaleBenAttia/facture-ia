@@ -8,6 +8,9 @@ Système complet et moderne pour scanner une facture (image ou PDF), en extraire
 - **Extraction par IA (Google Gemini)** : Analyse instantanée des montants, TVA, numéros de factures, et détail ligne par ligne des pièces (références, quantités, prix unitaires).
 - **Exports direct** : Téléchargement immédiat du tableau structuré au format Excel (`.xlsx`) ou PDF (`.pdf`).
 - **Historique de Session** : Garde une trace visuelle de toutes les factures traitées durant votre session.
+- **Prétraitement automatique des images** : Correction d'ombre, upscaling adaptatif, rehaussement de contraste (CLAHE), netteté optimisée avant envoi au LLM.
+- **Aperçu instantané** : Dès l'upload, l'image prétraitée est affichée dans l'interface (PDF converti en image visible).
+- **Débogage visuel** : L'image exacte envoyée à Gemini est sauvegardée dans `imagetraiter/`.
 
 ---
 
@@ -32,6 +35,8 @@ facture-ia/
 ├── requirements.txt        # 📦 Dépendances Python (FastAPI, google-genai, etc.)
 ├── main.py                 # ⚙️ SERVEUR BACKEND (FastAPI - Routes et configuration)
 ├── gemini_extractor.py     # Logique métier : Appel à l'API Gemini 2.5 pour l'extraction
+├── image_preprocessor.py   # 🖼️ Pipeline de prétraitement : ombre, upscale, CLAHE, sharpening
+├── imagetraiter/           # 📁 Dossier de débogage : dernière image envoyée à Gemini
 ├── excel_generator.py      # Génération du fichier Excel via openpyxl
 └── pdf_generator.py        # Génération du fichier PDF via reportlab
 ```
@@ -52,6 +57,8 @@ facture-ia/
 - **Serveur WSGI :** Uvicorn
 - **Modèle IA :** Google Gemini 2.5 (via le SDK `google-genai`)
 - **Génération de fichiers :** `openpyxl` (Excel) et `reportlab` (PDF)
+- **Prétraitement d'images :** `opencv-contrib-python-headless` (CLAHE, upscaling, ombre, netteté)
+- **Extraction PDF :** `pymupdf` (conversion PDF → image, extraction page)
 
 ---
 
@@ -103,6 +110,24 @@ npm run dev
 
 ---
 
+## 🖼️ Pipeline de Prétraitement (image_preprocessor.py)
+
+Avant d'envoyer une image à Gemini, elle passe par un pipeline adaptatif :
+
+| Étape | Déclencheur | Description |
+|---|---|---|
+| **Détection PDF** | `content_type == "application/pdf"` | Distingue PDF scanné (image) vs natif (texte vectoriel) |
+| **Extraction page** | PDF scanné | Rendu de la 1ʳᵉ page en image via PyMuPDF (300 DPI) |
+| **Suppression d'ombre** | Écart-type du fond > 18 | Algorithme de dilation + médian + normalisation |
+| **Upscaling** | < 0,5 MP → x4 ; < 2 MP → x2 | `cv2.INTER_CUBIC` + unsharp mask pour éviter les pixels |
+| **CLAHE** | Toujours (sauf PDF natif) | Rehaussement de contraste local pour mieux lire les chiffres |
+| **Filtre bilatéral** | Toujours | Réduction du bruit en préservant les contours |
+| **Sharpening** | Toujours | Netteté renforcée (`unsharp mask`) |
+
+L'image finale est encodée en PNG et envoyée à Gemini. Une copie est conservée dans `imagetraiter/derniere_image.png` pour déboguer.
+
+---
+
 *Projet audité et nettoyé automatiquement. Aucun fichier parasite n'est présent dans l'architecture.*
 
 ---
@@ -131,7 +156,7 @@ git status
 git add .
 
 # 3. Créer un commit avec un message descriptif
-git commit -m "correction vpn"
+git commit -m "api + annu"
 
 # 4. Envoyer les modifications sur GitHub
 git push origin main
