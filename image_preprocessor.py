@@ -18,11 +18,14 @@ def pdf_vers_images(pdf_bytes: bytes, dpi: int = 300) -> list:
     for page in doc:
         pix = page.get_pixmap(matrix=mat)
         img_array = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
-        img_bgr = (
-            cv2.cvtColor(img_array, cv2.COLOR_RGBA2BGR)
-            if pix.n == 4
-            else cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-        )
+        if pix.n == 4:
+            img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGBA2BGR)
+        elif pix.n == 3:
+            img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+        elif pix.n == 1:
+            img_bgr = cv2.cvtColor(img_array, cv2.COLOR_GRAY2BGR)
+        else:
+            img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
         images.append(img_bgr)
     doc.close()
     return images
@@ -39,6 +42,8 @@ def extraire_image_embarquee(pdf_bytes: bytes):
             nparr = np.frombuffer(img_bytes, np.uint8)
             img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             doc.close()
+            if img_bgr is None:
+                raise ValueError("Impossible de decoder l'image embarquee dans le PDF.")
             return img_bgr
     doc.close()
     return pdf_vers_images(pdf_bytes, dpi=300)[0]
@@ -68,6 +73,8 @@ def extraire_image_de_lentree(file_bytes: bytes, content_type: str):
     else:
         nparr = np.frombuffer(file_bytes, np.uint8)
         img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img_bgr is None:
+            raise ValueError(f"Impossible de decoder l'image (format: {content_type}). Fichier corrompu ou format non supporte.")
         return img_bgr, "scan"
 
 

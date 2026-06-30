@@ -144,6 +144,16 @@ Analyse tous les indices : langue, ville, code postal, mentions legales, matricu
 - Si aucun indice : deduis depuis le format des montants (dernier separateur = decimale)
 IMPORTANT : si devise TND, le point dans les montants est TOUJOURS decimal, jamais separateur de milliers.
 
+VERIFICATION PRIX RAISONNABLE (critique) :
+- Un article courant (stylo, bouteille, piece detachee) ne peut pas couter des milliers de dinars/dollars/euros.
+  Si un total_ht_ligne, prix_u_ht ou net_a_payer semble absurde, verifie la position du separateur decimal.
+  EXEMPLE : 7.411 TND = 7 dinars et 411 millimes (correct). 7411 TND ou 7411.0 TND = ABSURDE pour un article normal.
+- TND (Tunisie) : max 999.999 par ligne sauf facture de gros. 3 decimales toujours.
+- DZD (Algerie) : max 999999.99 par ligne. 2 decimales.
+- MAD (Maroc) : max 999999.99 par ligne. 2 decimales.
+- EUR : max 99999.99 par ligne.
+- Si le prix extrait est absurde (ex: 7411 DT), rapproche-le du prix visuel sur la facture avant d'ecrire le JSON.
+
 CHAMPS A EXTRAIRE :
 - type_facture : "Facture", "Proforma", "Avoir", "Bon de livraison", "Devis", etc.
 - etat : "PAYE" ou "IMPAYE" ou null. Cherche tampons, cachets, mentions explicites.
