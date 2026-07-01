@@ -75,7 +75,7 @@ def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: in
     for tentative in range(1, max_retries + 1):
         try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-2.0-flash",
                 contents=contents
             )
             return response
@@ -194,6 +194,9 @@ CHAMPS A EXTRAIRE :
 - societe_tel / societe_email : Extraire le contact principal. S'il y a PLUSIEURS numéros ou emails, place les autres EXCLUSIVEMENT dans `champs_supplementaires` avec des clés explicites (ex: "gsm1", "gsm2", "fixe", "email2").
 - champs_supplementaires : tout champ visible non couvert par le schema (dont les numéros/emails supplémentaires).
 
+PRODUITS — CHAMPS :
+- famille : categorie/produit famille (ex: "Informatique", "Bureau", "Epicerie"). null si absent.
+
 PRODUITS — GARDER LES NOMS DE COLONNES EXACTS DE LA FACTURE (obligatoire) :
 - Ne remplace PAS les noms de colonnes originaux par les noms du schema.
 - Si la facture a "Article" comme colonne, tu ecris "Article", pas "designation".
@@ -271,6 +274,7 @@ FORMAT JSON FINAL :
   "produits": [
     {
       "numero_ligne": 1,
+      "famille": null,
       "designation": null,
       "quantite": -9999,
       "prix_u_ht": -9999,
