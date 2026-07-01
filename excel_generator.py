@@ -71,10 +71,25 @@ def json_vers_excel(facture: dict):
     # Ajouter les clés supplémentaires à la fin
     fac_headers.extend(champs_sup_keys)
     
+    # Colonne "remarque" obligatoire en dernier
+    fac_headers.append("remarque")
+    
     write_headers(ws_fac, fac_headers)
     # Ecrire les valeurs en ligne 2
     for col, h in enumerate(fac_headers, 1):
-        if h in champs_sup_keys:
+        if h == "remarque":
+            parties = []
+            if f.get("mode_reglement"):
+                parties.append(f"Paiement : {f['mode_reglement']}")
+            if f.get("etat"):
+                parties.append(f"État : {f['etat']}")
+            echeance = champs_sup.get("Echeance") or champs_sup.get("Échéance") or champs_sup.get("echeance")
+            if echeance:
+                parties.append(f"Échéance : {echeance}")
+            if f.get("remarques"):
+                parties.append(f"{f['remarques']}")
+            ws_fac.cell(2, col, "; ".join(parties) if parties else "Rien à signaler")
+        elif h in champs_sup_keys:
             val = champs_sup.get(h)
             if isinstance(val, (dict, list)):
                 val = str(val)
