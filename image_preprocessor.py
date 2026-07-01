@@ -31,8 +31,9 @@ def pdf_vers_images(pdf_bytes: bytes, dpi: int = 300) -> list:
     return images
 
 
-def extraire_image_embarquee(pdf_bytes: bytes):
+def extraire_images_embarquees(pdf_bytes: bytes) -> list:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    resultats = []
     for page in doc:
         images = page.get_images(full=True)
         if images:
@@ -41,17 +42,18 @@ def extraire_image_embarquee(pdf_bytes: bytes):
             img_bytes = base_image["image"]
             nparr = np.frombuffer(img_bytes, np.uint8)
             img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            doc.close()
             if img_bgr is None:
-                raise ValueError("Impossible de decoder l'image embarquee dans le PDF.")
-            return img_bgr
+                continue
+            resultats.append(img_bgr)
     doc.close()
-    return pdf_vers_images(pdf_bytes, dpi=300)[0]
+    if resultats:
+        return resultats
+    return pdf_vers_images(pdf_bytes, dpi=300)
 
 
 def extraire_image_de_lentree(file_bytes: bytes, content_type: str):
     """
-    Retourne (image_opencv, type_contenu).
+    Retourne (liste_images, type_contenu).
     type_contenu = "scan"  -> pipeline complet de filtres
     type_contenu = "natif" -> aucun filtre (texte vectoriel déjà net)
     """
@@ -62,20 +64,17 @@ def extraire_image_de_lentree(file_bytes: bytes, content_type: str):
         doc.close()
 
         if texte_total < 50:
-            img_bgr = pdf_vers_images(file_bytes, dpi=300)[0]
-            return img_bgr, "scan"
+            return pdf_vers_images(file_bytes, dpi=300), "scan"
         elif nb_images_embarquees > 0:
-            img_bgr = extraire_image_embarquee(file_bytes)
-            return img_bgr, "scan"
+            return extraire_images_embarquees(file_bytes), "scan"
         else:
-            img_bgr = pdf_vers_images(file_bytes, dpi=200)[0]
-            return img_bgr, "natif"
+            return pdf_vers_images(file_bytes, dpi=200), "natif"
     else:
         nparr = np.frombuffer(file_bytes, np.uint8)
         img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img_bgr is None:
             raise ValueError(f"Impossible de decoder l'image (format: {content_type}). Fichier corrompu ou format non supporte.")
-        return img_bgr, "scan"
+        return [img_bgr], "scan"
 
 
 # ---------- Détection ----------
@@ -129,12 +128,7 @@ def pipeline_adaptatif_complet(img_bgr, verbose: bool = True):
     if verbose:
         print(f"[preprocessing] Résolution: {w}x{h} ({taille_px / 1e6:.1f} MP)")
 
-    if detecter_ombre(img_bgr):
-        img = supprimer_ombre(img_bgr)
-        if verbose: print("[preprocessing] ✓ Ombre corrigée")
-    else:
-        img = img_bgr
-        if verbose: print("[preprocessing] ✗ Pas d'ombre")
+    img = img_bgr
 
     if taille_px < 0.5e6:
         img = upscale_smooth(img, facteur=4)
@@ -162,13 +156,14 @@ def pipeline_adaptatif_complet(img_bgr, verbose: bool = True):
 def preparer_image_pour_llm(file_bytes: bytes, content_type: str, verbose: bool = True):
     """
     Point d'entrée unique utilisé par gemini_extractor.py.
-    Retourne une image OpenCV (BGR) prête à être encodée et envoyée au LLM.
+    Retourne une liste d'images OpenCV (BGR) prêtes à être encodées et envoyées au LLM.
+    Une image simple → liste d'un élément. Un PDF multi-pages → N éléments.
     """
-    img_bgr, type_contenu = extraire_image_de_lentree(file_bytes, content_type)
+    images_bgr, type_contenu = extraire_image_de_lentree(file_bytes, content_type)
 
     if type_contenu == "scan":
-        img_bgr = pipeline_adaptatif_complet(img_bgr, verbose=verbose)
+        images_bgr = [pipeline_adaptatif_complet(img, verbose=verbose) for img in images_bgr]
     else:
-        if verbose: print("[preprocessing] ✗ PDF natif: aucun filtre appliqué (texte déjà net)")
+        if verbose: print(f"[preprocessing] ✗ PDF natif: aucun filtre appliqué ({len(images_bgr)} page(s))")
 
-    return img_bgr
+    return images_bgr
