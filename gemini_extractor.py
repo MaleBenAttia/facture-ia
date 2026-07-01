@@ -17,17 +17,19 @@ FICHIER      = "usage_counter.json"
 compteur_lock = threading.Lock()
 
 # ─── CLÉS API AVEC FALLBACK ────────────────────────────────────────────────
-# Charge les deux clés (rétrocompatible : si KEY1 absent, tente GEMINI_API_KEY)
+# Charge jusqu'à 4 clés (rétrocompatible : si KEY1 absent, tente GEMINI_API_KEY)
 GEMINI_API_KEYS = [
     k for k in [
         os.getenv("GEMINI_API_KEY1"),
         os.getenv("GEMINI_API_KEY2"),
+        os.getenv("GEMINI_API_KEY3"),
+        os.getenv("GEMINI_API_KEY4"),
         os.getenv("GEMINI_API_KEY"),   # ancienne clé unique (fallback final)
     ] if k
 ]
 if not GEMINI_API_KEYS:
     raise EnvironmentError("Aucune clé API Gemini trouvée dans le fichier .env ! "
-                           "Définissez GEMINI_API_KEY1 et/ou GEMINI_API_KEY2.")
+                           "Définissez GEMINI_API_KEY1..4 ou GEMINI_API_KEY.")
 
 # Log de démarrage : confirme le chargement des clés (masquées)
 print(f"[GEMINI] {len(GEMINI_API_KEYS)} clé(s) API chargée(s) :", end=" ")
@@ -67,7 +69,7 @@ def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: in
     """
     if not api_key or not api_key.strip():
         raise ValueError(
-            "api_key est vide ou None. Vérifiez GEMINI_API_KEY1 / GEMINI_API_KEY2 dans .env"
+            "api_key est vide ou None. Vérifiez GEMINI_API_KEY1..4 dans .env"
         )
     client = genai.Client(api_key=api_key.strip())
     contents = [types.Part.from_bytes(data=data, mime_type=mime)
@@ -99,13 +101,15 @@ def extraire_facture(image_path: str, content_type: str = "image/png", cancel_ev
         k for k in [
             os.getenv("GEMINI_API_KEY1"),
             os.getenv("GEMINI_API_KEY2"),
+            os.getenv("GEMINI_API_KEY3"),
+            os.getenv("GEMINI_API_KEY4"),
             os.getenv("GEMINI_API_KEY"),
         ] if k and k.strip()
     ]
     if not cles_actives:
         raise EnvironmentError(
             f"Aucune clé API trouvée dans {_ENV_PATH}. "
-            "Définissez GEMINI_API_KEY1 et/ou GEMINI_API_KEY2."
+            "Définissez GEMINI_API_KEY1..4 ou GEMINI_API_KEY."
         )
     print(f"  [API] {len(cles_actives)} clé(s) disponibles : "
           + "  ".join(f"Clé{i}=...{k[-6:]}" for i, k in enumerate(cles_actives, 1)))
