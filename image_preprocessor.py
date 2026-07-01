@@ -77,7 +77,7 @@ def extraire_image_de_lentree(file_bytes: bytes, content_type: str):
         if texte_total < 50:
             return pdf_vers_images(file_bytes, dpi=300), "scan"
         elif nb_images_embarquees > 0:
-            return extraire_images_embarquees(file_bytes), "scan"
+            return pdf_vers_images(file_bytes, dpi=300), "scan"
         else:
             return pdf_vers_images(file_bytes, dpi=300), "natif"
     else:
