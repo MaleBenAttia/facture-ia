@@ -110,7 +110,7 @@ def json_vers_excel(facture: dict):
     has_total_ttc = any(p.get("total_ttc") not in (None, "", -9999) for p in produits)
     has_tva = any(p.get("tva_pct") not in (None, "", -9999) for p in produits)
 
-    pro_headers = ["numero_facture", "designation", "quantite", "prix_u_ht"]
+    pro_headers = ["designation", "quantite", "prix_u_ht"]
     if has_tva:      pro_headers.append("tva_pct")
     if has_remise:   pro_headers.append("remise_pct")
     if has_total_ht: pro_headers.append("total_ht_ligne")
@@ -127,7 +127,6 @@ def json_vers_excel(facture: dict):
 
     write_headers(ws_pro, pro_headers)
     for row_idx, p in enumerate(produits, 2):
-        p["numero_facture"] = f.get("numero_facture")
         pro_champs_sup = p.get("champs_supplementaires") or {}
         for col, h in enumerate(pro_headers, 1):
             if h in pro_champs_sup_keys:
