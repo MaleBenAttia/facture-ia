@@ -199,56 +199,66 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
           <table className="w-full min-w-[480px] text-sm">
             <thead>
               <tr className="border-b border-white/10 text-left text-[11px] uppercase tracking-wide text-text-muted">
-                <th className="py-2 pr-3 font-medium">Désignation</th>
-                <th className="py-2 px-3 font-medium text-center">Qté</th>
-                <th className="py-2 px-3 font-medium text-right">Prix U HT</th>
-                {colonnes.tva && <th className="py-2 px-3 font-medium text-center">TVA</th>}
-                {colonnes.remise && <th className="py-2 px-3 font-medium text-center">Remise</th>}
-                {colonnes.totalHt && <th className="py-2 px-3 font-medium text-right">Total HT</th>}
-                {colonnes.totalTtc && <th className="py-2 pl-3 font-medium text-right">Total TTC</th>}
-                {proSupKeys.map(key => (
-                  <th key={key} className="py-2 px-3 font-medium text-center text-[11px]">
-                    {key.replace(/_/g, ' ')}
-                  </th>
-                ))}
+                {proSupKeys.length > 0 ? (
+                  proSupKeys.map(key => (
+                    <th key={key} className="py-2 px-3 font-medium text-center text-[11px]">
+                      {key.replace(/_/g, ' ')}
+                    </th>
+                  ))
+                ) : (
+                  <>
+                    <th className="py-2 pr-3 font-medium">Désignation</th>
+                    <th className="py-2 px-3 font-medium text-center">Qté</th>
+                    <th className="py-2 px-3 font-medium text-right">Prix U HT</th>
+                    {colonnes.tva && <th className="py-2 px-3 font-medium text-center">TVA</th>}
+                    {colonnes.remise && <th className="py-2 px-3 font-medium text-center">Remise</th>}
+                    {colonnes.totalHt && <th className="py-2 px-3 font-medium text-right">Total HT</th>}
+                    {colonnes.totalTtc && <th className="py-2 pl-3 font-medium text-right">Total TTC</th>}
+                  </>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {produits.map((p, i) => (
                 <tr key={i} className="text-ink">
-                  <td className="py-2.5 pr-3">{p.designation || "—"}</td>
-                  <td className="py-2.5 px-3 text-center text-text-muted">
-                    {estVide(p.quantite) ? "—" : p.quantite}
-                  </td>
-                  <td className="py-2.5 px-3 text-right">{formatMontant(p.prix_u_ht, devise)}</td>
-                  {colonnes.tva && (
-                    <td className="py-2.5 px-3 text-center text-text-muted">
-                      {formatPourcentage(p.tva_pct)}
-                    </td>
-                  )}
-                  {colonnes.remise && (
-                    <td className="py-2.5 px-3 text-center text-text-muted">
-                      {formatPourcentage(p.remise_pct)}
-                    </td>
-                  )}
-                  {colonnes.totalHt && (
-                    <td className="py-2.5 px-3 text-right">
-                      {formatMontant(p.total_ht_ligne, devise)}
-                    </td>
-                  )}
-                  {colonnes.totalTtc && (
-                    <td className="py-2.5 pl-3 text-right font-medium">
-                      {formatMontant(p.total_ttc, devise)}
-                    </td>
-                  )}
-                  {proSupKeys.map(key => {
-                    const val = p.champs_supplementaires?.[key];
-                    return (
-                      <td key={key} className="py-2.5 px-3 text-center text-text-muted text-xs">
-                        {estVide(val) ? "—" : String(val)}
+                  {proSupKeys.length > 0 ? (
+                    proSupKeys.map(key => {
+                      const val = p.champs_supplementaires?.[key];
+                      return (
+                        <td key={key} className="py-2.5 px-3 text-center text-text-muted text-xs">
+                          {estVide(val) ? "—" : String(val)}
+                        </td>
+                      );
+                    })
+                  ) : (
+                    <>
+                      <td className="py-2.5 pr-3">{p.designation || "—"}</td>
+                      <td className="py-2.5 px-3 text-center text-text-muted">
+                        {estVide(p.quantite) ? "—" : p.quantite}
                       </td>
-                    );
-                  })}
+                      <td className="py-2.5 px-3 text-right">{formatMontant(p.prix_u_ht, devise)}</td>
+                      {colonnes.tva && (
+                        <td className="py-2.5 px-3 text-center text-text-muted">
+                          {formatPourcentage(p.tva_pct)}
+                        </td>
+                      )}
+                      {colonnes.remise && (
+                        <td className="py-2.5 px-3 text-center text-text-muted">
+                          {formatPourcentage(p.remise_pct)}
+                        </td>
+                      )}
+                      {colonnes.totalHt && (
+                        <td className="py-2.5 px-3 text-right">
+                          {formatMontant(p.total_ht_ligne, devise)}
+                        </td>
+                      )}
+                      {colonnes.totalTtc && (
+                        <td className="py-2.5 pl-3 text-right font-medium">
+                          {formatMontant(p.total_ttc, devise)}
+                        </td>
+                      )}
+                    </>
+                  )}
                 </tr>
               ))}
             </tbody>

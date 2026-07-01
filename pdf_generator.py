@@ -175,35 +175,6 @@ def json_vers_pdf(facture: dict, filename: str = None) -> str:
         elements.append(Spacer(1, 0.5 * cm))
 
     # --- Tableau produits ---
-    has_remise = any(
-        p.get("remise_pct") not in (None, NULL_VAL, 0) for p in produits
-    )
-    has_tva = any(
-        p.get("tva_pct") not in (None, NULL_VAL) for p in produits
-    )
-    has_ttc = any(
-        p.get("total_ttc") not in (None, NULL_VAL) for p in produits
-    )
-    has_ht_ligne = any(
-        p.get("total_ht_ligne") not in (None, NULL_VAL) for p in produits
-    )
-
-    prod_headers = ["D\u00e9signation", "Qt\u00e9", "Prix U HT"]
-    col_widths = [6.5 * cm, 1.3 * cm, 2.7 * cm]
-
-    if has_tva:
-        prod_headers.append("TVA %")
-        col_widths.append(1.8 * cm)
-    if has_remise:
-        prod_headers.append("Remise %")
-        col_widths.append(1.8 * cm)
-    if has_ht_ligne:
-        prod_headers.append("Total HT")
-        col_widths.append(2.4 * cm)
-    if has_ttc:
-        prod_headers.append("Total TTC")
-        col_widths.append(2.4 * cm)
-
     # Collecter les cles uniques de champs_supplementaires dans les produits
     pro_champs_sup_keys = []
     for p in produits:
@@ -211,36 +182,42 @@ def json_vers_pdf(facture: dict, filename: str = None) -> str:
         for k in sup:
             if k not in pro_champs_sup_keys:
                 pro_champs_sup_keys.append(k)
-    for k in pro_champs_sup_keys:
-        prod_headers.append(k)
-        col_widths.append(2.5 * cm)
+
+    # Si champs_supplementaires existe, on les utilise UNIQUEMENT (pas de doublon)
+    if pro_champs_sup_keys:
+        prod_headers = list(pro_champs_sup_keys)
+        col_widths = [max(2.5, 18 / len(prod_headers)) * cm] * len(prod_headers)
+    else:
+        has_remise = any(p.get("remise_pct") not in (None, NULL_VAL, 0) for p in produits)
+        has_tva = any(p.get("tva_pct") not in (None, NULL_VAL) for p in produits)
+        has_ttc = any(p.get("total_ttc") not in (None, NULL_VAL) for p in produits)
+        has_ht_ligne = any(p.get("total_ht_ligne") not in (None, NULL_VAL) for p in produits)
+        prod_headers = ["D\u00e9signation", "Qt\u00e9", "Prix U HT"]
+        col_widths = [6.5 * cm, 1.3 * cm, 2.7 * cm]
+        if has_tva:
+            prod_headers.append("TVA %"); col_widths.append(1.8 * cm)
+        if has_remise:
+            prod_headers.append("Remise %"); col_widths.append(1.8 * cm)
+        if has_ht_ligne:
+            prod_headers.append("Total HT"); col_widths.append(2.4 * cm)
+        if has_ttc:
+            prod_headers.append("Total TTC"); col_widths.append(2.4 * cm)
 
     # Ligne d'en-tete en Paragraph (pour un wrap propre meme sur l'en-tete)
     prod_data = [[Paragraph(safe(h), cell_header_style) for h in prod_headers]]
 
     for p in produits:
-        designation = Paragraph(safe(p.get("designation") or "-"), cell_style)
-        qte_val = p.get("quantite")
-        qte = fmt(qte_val, 0) if qte_val not in (None, NULL_VAL) else "-"
-        row = [
-            designation,
-            Paragraph(safe(qte), cell_style_center),
-            Paragraph(safe(fmt(p.get("prix_u_ht"), decimals)), cell_style_center),
-        ]
-        if has_tva:
-            row.append(Paragraph(safe(fmt_tva(p.get("tva_pct"))), cell_style_center))
-        if has_remise:
-            remise_val = p.get("remise_pct")
-            remise = f"{fmt(remise_val, 0)}%" if remise_val not in (None, NULL_VAL) else "-"
-            row.append(Paragraph(safe(remise), cell_style_center))
-        if has_ht_ligne:
-            row.append(Paragraph(safe(fmt(p.get("total_ht_ligne"), decimals)), cell_style_center))
-        if has_ttc:
-            row.append(Paragraph(safe(fmt(p.get("total_ttc"), decimals)), cell_style_center))
-        # Ajouter les champs supplementaires
         pro_champs_sup = p.get("champs_supplementaires") or {}
-        for k in pro_champs_sup_keys:
-            val = pro_champs_sup.get(k)
+        row = []
+        for h in prod_headers:
+            val = pro_champs_sup.get(h)
+            if val is None and not pro_champs_sup_keys:
+                # Fallback colonnes standard
+                mapping = {"D\u00e9signation": "designation", "Qt\u00e9": "quantite", "Prix U HT": "prix_u_ht",
+                           "TVA %": "tva_pct", "Remise %": "remise_pct", "Total HT": "total_ht_ligne", "Total TTC": "total_ttc"}
+                std_key = mapping.get(h)
+                if std_key:
+                    val = p.get(std_key)
             if val in (None, NULL_VAL):
                 row.append(Paragraph("-", cell_style_center))
             elif isinstance(val, (dict, list)):

@@ -120,17 +120,6 @@ def json_vers_excel(facture: dict):
             ws_cli.cell(2, col, c.get(h))
 
     # --- Feuille Produits ---
-    has_remise = any(p.get("remise_pct") not in (None, "", -9999) for p in produits)
-    has_total_ht = any(p.get("total_ht_ligne") not in (None, "", -9999) for p in produits)
-    has_total_ttc = any(p.get("total_ttc") not in (None, "", -9999) for p in produits)
-    has_tva = any(p.get("tva_pct") not in (None, "", -9999) for p in produits)
-
-    pro_headers = ["designation", "quantite", "prix_u_ht"]
-    if has_tva:      pro_headers.append("tva_pct")
-    if has_remise:   pro_headers.append("remise_pct")
-    if has_total_ht: pro_headers.append("total_ht_ligne")
-    if has_total_ttc: pro_headers.append("total_ttc")
-
     # Collecter toutes les cles uniques de champs_supplementaires dans les produits
     pro_champs_sup_keys = []
     for p in produits:
@@ -138,20 +127,32 @@ def json_vers_excel(facture: dict):
         for k in sup:
             if k not in pro_champs_sup_keys:
                 pro_champs_sup_keys.append(k)
-    pro_headers.extend(pro_champs_sup_keys)
+
+    # Si champs_supplementaires existe, on les utilise UNIQUEMENT (pas de doublon)
+    if pro_champs_sup_keys:
+        pro_headers = pro_champs_sup_keys
+    else:
+        # Fallback : colonnes standard si pas de champs_supplementaires
+        pro_headers = ["designation", "quantite", "prix_u_ht"]
+        has_remise = any(p.get("remise_pct") not in (None, "", -9999) for p in produits)
+        has_total_ht = any(p.get("total_ht_ligne") not in (None, "", -9999) for p in produits)
+        has_total_ttc = any(p.get("total_ttc") not in (None, "", -9999) for p in produits)
+        has_tva = any(p.get("tva_pct") not in (None, "", -9999) for p in produits)
+        if has_tva:      pro_headers.append("tva_pct")
+        if has_remise:   pro_headers.append("remise_pct")
+        if has_total_ht: pro_headers.append("total_ht_ligne")
+        if has_total_ttc: pro_headers.append("total_ttc")
 
     write_headers(ws_pro, pro_headers)
     for row_idx, p in enumerate(produits, 2):
         pro_champs_sup = p.get("champs_supplementaires") or {}
         for col, h in enumerate(pro_headers, 1):
-            if h in pro_champs_sup_keys:
-                val = pro_champs_sup.get(h)
-                if isinstance(val, (dict, list)):
-                    val = str(val)
-                ws_pro.cell(row_idx, col, val if val not in (-9999,) else None)
-            else:
+            val = pro_champs_sup.get(h)
+            if val is None and not pro_champs_sup_keys:
                 val = p.get(h)
-                ws_pro.cell(row_idx, col, val if val not in (-9999,) else None)
+            if isinstance(val, (dict, list)):
+                val = str(val)
+            ws_pro.cell(row_idx, col, val if val not in (-9999,) else None)
 
     wb.save(filepath)
     return filename
