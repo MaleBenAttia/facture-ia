@@ -156,11 +156,11 @@ def pipeline_adaptatif_complet(img_bgr, verbose: bool = True):
 def _preprocessing_minimal(img_bgr, verbose: bool = True):
     h, w = img_bgr.shape[:2]
     taille_px = h * w
-    if taille_px < 0.5e6:
-        facteur = min(2.0, (1e6 / taille_px) ** 0.5)
+    if taille_px < 1.5e6:
+        facteur = min(2.0, (2e6 / max(taille_px, 1)) ** 0.5)
         img_bgr = cv2.resize(img_bgr, None, fx=facteur, fy=facteur, interpolation=cv2.INTER_CUBIC)
         if verbose: print(f"[preprocessing] → Upscale x{facteur:.1f} ({w}x{h} -> {int(w*facteur)}x{int(h*facteur)})")
-    img_bgr = cv2.addWeighted(img_bgr, 1.3, cv2.GaussianBlur(img_bgr, (0, 0), 0.5), -0.3, 0)
+    img_bgr = cv2.addWeighted(img_bgr, 1.4, cv2.GaussianBlur(img_bgr, (0, 0), 0.5), -0.4, 0)
     return img_bgr
 
 

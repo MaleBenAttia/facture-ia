@@ -153,7 +153,7 @@ def extraire_facture(image_path: str, content_type: str = "image/png", cancel_ev
     if not images_bgr:
         raise ValueError("Aucune image extraite du fichier")
     print(f"  [PREPROC] {len(images_bgr)} page(s) prétraitée(s), encodage PNG...")
-    MAX_LONG_COTE = 1200
+    MAX_LONG_COTE = 2000
     pages_data = []
     for i, img_bgr in enumerate(images_bgr):
         h, w = img_bgr.shape[:2]
