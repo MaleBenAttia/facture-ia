@@ -1,5 +1,6 @@
-from google import genai
-from google.genai import types
+import google.generativeai as genai
+import PIL.Image
+import io
 import json, os, threading, time
 from pathlib import Path
 from datetime import date, datetime
@@ -69,7 +70,7 @@ def sauver_compteur(data):
 
 def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: int = 2):
     """
-    Effectue un appel Gemini avec la clé fournie.
+    Effectue un appel Gemini avec la clé fournie (SDK google.generativeai).
     Essaye chaque modèle dans MODELES jusqu'à en trouver un qui répond.
     pages_data: liste de tuples (image_data: bytes, mime_type: str) — une par page.
     Lève une exception si tous les modèles échouent.
@@ -78,18 +79,19 @@ def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: in
         raise ValueError(
             "api_key est vide ou None. Vérifiez GEMINI_API_KEY1..6 dans .env"
         )
-    client = genai.Client(api_key=api_key.strip())
-    contents = [types.Part.from_bytes(data=data, mime_type=mime)
-                for data, mime in pages_data] + [prompt]
+    genai.configure(api_key=api_key.strip())
+
+    # Convert bytes to PIL Images
+    pil_images = []
+    for data, mime in pages_data:
+        pil_images.append(PIL.Image.open(io.BytesIO(data)))
 
     dernier_erreur = None
     for modele in MODELES:
         for tentative in range(1, max_retries + 1):
             try:
-                response = client.models.generate_content(
-                    model=modele,
-                    contents=contents
-                )
+                model = genai.GenerativeModel(modele)
+                response = model.generate_content(pil_images + [prompt])
                 if modele != MODELES[0]:
                     print(f"  [API]  Modèle utilisé: {modele}")
                 return response
