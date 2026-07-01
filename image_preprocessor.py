@@ -162,7 +162,7 @@ def preparer_image_pour_llm(file_bytes: bytes, content_type: str, verbose: bool 
     images_bgr, type_contenu = extraire_image_de_lentree(file_bytes, content_type)
 
     if type_contenu == "scan":
-        images_bgr = [pipeline_adaptatif_complet(img, verbose=verbose) for img in images_bgr]
+        if verbose: print(f"[preprocessing] ✗ Pipeline désactivé (images brutes envoyées au LLM)")
     else:
         if verbose: print(f"[preprocessing] ✗ PDF natif: aucun filtre appliqué ({len(images_bgr)} page(s))")
 
