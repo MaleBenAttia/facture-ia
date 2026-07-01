@@ -17,19 +17,26 @@ FICHIER      = "usage_counter.json"
 compteur_lock = threading.Lock()
 
 # ─── CLÉS API AVEC FALLBACK ────────────────────────────────────────────────
-# Charge jusqu'à 4 clés (rétrocompatible : si KEY1 absent, tente GEMINI_API_KEY)
+# Charge jusqu'à 6 clés (rétrocompatible : si KEY1 absent, tente GEMINI_API_KEY)
 GEMINI_API_KEYS = [
     k for k in [
         os.getenv("GEMINI_API_KEY1"),
         os.getenv("GEMINI_API_KEY2"),
         os.getenv("GEMINI_API_KEY3"),
         os.getenv("GEMINI_API_KEY4"),
+        os.getenv("GEMINI_API_KEY5"),
+        os.getenv("GEMINI_API_KEY6"),
         os.getenv("GEMINI_API_KEY"),   # ancienne clé unique (fallback final)
     ] if k
 ]
 if not GEMINI_API_KEYS:
     raise EnvironmentError("Aucune clé API Gemini trouvée dans le fichier .env ! "
-                           "Définissez GEMINI_API_KEY1..4 ou GEMINI_API_KEY.")
+                           "Définissez GEMINI_API_KEY1..6 ou GEMINI_API_KEY.")
+
+# ─── MODÈLES PRIORITAIRES ──────────────────────────────────────────────────
+# Chaque clé peut avoir accès à des modèles différents selon son quota.
+# On essaie dans cet ordre jusqu'à trouver un modèle qui répond.
+MODELES = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-001"]
 
 # Log de démarrage : confirme le chargement des clés (masquées)
 print(f"[GEMINI] {len(GEMINI_API_KEYS)} clé(s) API chargée(s) :", end=" ")
@@ -60,36 +67,48 @@ def sauver_compteur(data):
     with open(FICHIER, "w") as f:
         json.dump(data, f)
 
-def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: int = 3):
+def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: int = 2):
     """
     Effectue un appel Gemini avec la clé fournie.
+    Essaye chaque modèle dans MODELES jusqu'à en trouver un qui répond.
     pages_data: liste de tuples (image_data: bytes, mime_type: str) — une par page.
-    max_retries: nombre de tentatives en cas de 503 (surcharge).
-    Lève une exception si toutes les tentatives échouent.
+    Lève une exception si tous les modèles échouent.
     """
     if not api_key or not api_key.strip():
         raise ValueError(
-            "api_key est vide ou None. Vérifiez GEMINI_API_KEY1..4 dans .env"
+            "api_key est vide ou None. Vérifiez GEMINI_API_KEY1..6 dans .env"
         )
     client = genai.Client(api_key=api_key.strip())
     contents = [types.Part.from_bytes(data=data, mime_type=mime)
                 for data, mime in pages_data] + [prompt]
-    for tentative in range(1, max_retries + 1):
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=contents
-            )
-            return response
-        except Exception as e:
-            est_503 = "503" in str(e) or "UNAVAILABLE" in str(e)
-            if est_503 and tentative < max_retries:
-                attente = 2 ** tentative
-                print(f"  [API]  503 (tentative {tentative}/{max_retries}) — nouvel essai dans {attente}s...")
-                time.sleep(attente)
-                continue
-            raise
-    raise RuntimeError("Impossible d'atteindre Gemini après plusieurs tentatives.")
+
+    dernier_erreur = None
+    for modele in MODELES:
+        for tentative in range(1, max_retries + 1):
+            try:
+                response = client.models.generate_content(
+                    model=modele,
+                    contents=contents
+                )
+                if modele != MODELES[0]:
+                    print(f"  [API]  Modèle utilisé: {modele}")
+                return response
+            except Exception as e:
+                dernier_erreur = e
+                msg = str(e)
+                est_503 = "503" in msg or "UNAVAILABLE" in msg
+                est_429 = "429" in msg or "RESOURCE_EXHAUSTED" in msg
+                est_image = "image" in msg.lower() and "not support" in msg.lower()
+
+                if est_503 and tentative < max_retries:
+                    attente = 2 ** tentative
+                    print(f"  [API]  {modele} 503 (tentative {tentative}/{max_retries}) — dans {attente}s...")
+                    time.sleep(attente)
+                    continue
+                if est_429 or est_image or tentative == max_retries:
+                    break
+
+    raise dernier_erreur or RuntimeError("Impossible d'atteindre Gemini.")
 
 
 def extraire_facture(image_path: str, content_type: str = "image/png", cancel_event=None) -> dict:
@@ -103,13 +122,15 @@ def extraire_facture(image_path: str, content_type: str = "image/png", cancel_ev
             os.getenv("GEMINI_API_KEY2"),
             os.getenv("GEMINI_API_KEY3"),
             os.getenv("GEMINI_API_KEY4"),
+            os.getenv("GEMINI_API_KEY5"),
+            os.getenv("GEMINI_API_KEY6"),
             os.getenv("GEMINI_API_KEY"),
         ] if k and k.strip()
     ]
     if not cles_actives:
         raise EnvironmentError(
             f"Aucune clé API trouvée dans {_ENV_PATH}. "
-            "Définissez GEMINI_API_KEY1..4 ou GEMINI_API_KEY."
+            "Définissez GEMINI_API_KEY1..6 ou GEMINI_API_KEY."
         )
     print(f"  [API] {len(cles_actives)} clé(s) disponibles : "
           + "  ".join(f"Clé{i}=...{k[-6:]}" for i, k in enumerate(cles_actives, 1)))
