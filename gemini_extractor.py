@@ -344,31 +344,6 @@ FORMAT JSON FINAL :
         compteur["cout_jour"]       += cout_requete
         sauver_compteur(compteur)
 
-    restant_jour   = QUOTA_JOUR   - compteur["requetes_jour"]
-    restant_minute = QUOTA_MINUTE - compteur["requetes_minute"]
-
-    print("\n=============================")
-    print(f"   TOKENS CETTE REQUETE  (API clé n°{api_utilisee})")
-    if len(erreurs_api) > 0:
-        print(f"   ⚠️  {len(erreurs_api)} clé(s) ont échoué avant succès")
-        for e in erreurs_api:
-            print(f"      • {e}")
-    print("=============================")
-    print(f"  Input    : {tokens_input:,} tokens")
-    print(f"  Thinking : {tokens_thinking:,} tokens")
-    print(f"  Output   : {tokens_output:,} tokens")
-    print(f"  Total    : {tokens_total:,} tokens")
-    print(f"  Cout     : ${cout_requete:.6f}  ({cout_requete * 3.3:.6f} TND)")
-    print("----- QUOTA MINUTE -----")
-    print(f"  Utilises : {compteur['requetes_minute']} / {QUOTA_MINUTE}")
-    print(f"  Restants : {restant_minute}")
-    print("----- QUOTA JOUR -------")
-    print(f"  Utilises : {compteur['requetes_jour']} / {QUOTA_JOUR}")
-    print(f"  Restants : {restant_jour}")
-    print(f"  Tokens   : {compteur['tokens_jour']:,}")
-    print(f"  Cout     : ${compteur['cout_jour']:.6f}  ({compteur['cout_jour'] * 3.3:.6f} TND)")
-    print("=============================\n")
-
     text = response.text.strip()
     print("=== REPONSE GEMINI ===")
     print(text)
@@ -404,9 +379,38 @@ FORMAT JSON FINAL :
 
     for _ in range(2):
         try:
-            return json.loads(text)
+            resultat = json.loads(text)
+            break
         except json.JSONDecodeError:
             text = reparer_json(text)
+    else:
+        print(f"  [JSON] ÉCHEC — contenu brut (premiers 500c) : {text[:500]}")
+        raise ValueError(f"Réponse JSON invalide après réparation.")
 
-    print(f"  [JSON] ÉCHEC — contenu brut (premiers 500c) : {text[:500]}")
-    raise ValueError(f"Réponse JSON invalide après réparation.")
+    # ── Tokens et quotas (affiché en dernier dans le debug) ──────────────
+    restant_jour   = QUOTA_JOUR   - compteur["requetes_jour"]
+    restant_minute = QUOTA_MINUTE - compteur["requetes_minute"]
+
+    print("\n=============================")
+    print(f"   TOKENS CETTE REQUETE  (API clé n°{api_utilisee})")
+    if len(erreurs_api) > 0:
+        print(f"   ⚠️  {len(erreurs_api)} clé(s) ont échoué avant succès")
+        for e in erreurs_api:
+            print(f"      • {e}")
+    print("=============================")
+    print(f"  Input    : {tokens_input:,} tokens")
+    print(f"  Thinking : {tokens_thinking:,} tokens")
+    print(f"  Output   : {tokens_output:,} tokens")
+    print(f"  Total    : {tokens_total:,} tokens")
+    print(f"  Cout     : ${cout_requete:.6f}  ({cout_requete * 3.3:.6f} TND)")
+    print("----- QUOTA MINUTE -----")
+    print(f"  Utilises : {compteur['requetes_minute']} / {QUOTA_MINUTE}")
+    print(f"  Restants : {restant_minute}")
+    print("----- QUOTA JOUR -------")
+    print(f"  Utilises : {compteur['requetes_jour']} / {QUOTA_JOUR}")
+    print(f"  Restants : {restant_jour}")
+    print(f"  Tokens   : {compteur['tokens_jour']:,}")
+    print(f"  Cout     : ${compteur['cout_jour']:.6f}  ({compteur['cout_jour'] * 3.3:.6f} TND)")
+    print("=============================\n")
+
+    return resultat
