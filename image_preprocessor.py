@@ -152,6 +152,18 @@ def pipeline_adaptatif_complet(img_bgr, verbose: bool = True):
     return img
 
 
+# ---------- Pipeline minimal (préserve le logo) ----------
+def _preprocessing_minimal(img_bgr, verbose: bool = True):
+    h, w = img_bgr.shape[:2]
+    taille_px = h * w
+    if taille_px < 0.5e6:
+        facteur = min(2.0, (1e6 / taille_px) ** 0.5)
+        img_bgr = cv2.resize(img_bgr, None, fx=facteur, fy=facteur, interpolation=cv2.INTER_CUBIC)
+        if verbose: print(f"[preprocessing] → Upscale x{facteur:.1f} ({w}x{h} -> {int(w*facteur)}x{int(h*facteur)})")
+    img_bgr = cv2.addWeighted(img_bgr, 1.3, cv2.GaussianBlur(img_bgr, (0, 0), 0.5), -0.3, 0)
+    return img_bgr
+
+
 # ---------- Point d'entrée public ----------
 def preparer_image_pour_llm(file_bytes: bytes, content_type: str, verbose: bool = True):
     """
@@ -162,7 +174,8 @@ def preparer_image_pour_llm(file_bytes: bytes, content_type: str, verbose: bool 
     images_bgr, type_contenu = extraire_image_de_lentree(file_bytes, content_type)
 
     if type_contenu == "scan":
-        if verbose: print(f"[preprocessing] ✗ Pipeline désactivé (images brutes envoyées au LLM)")
+        # Pipeline minimal : redimensionnement si trop petit + léger contraste
+        images_bgr = [_preprocessing_minimal(img, verbose=verbose) for img in images_bgr]
     else:
         if verbose: print(f"[preprocessing] ✗ PDF natif: aucun filtre appliqué ({len(images_bgr)} page(s))")
 
