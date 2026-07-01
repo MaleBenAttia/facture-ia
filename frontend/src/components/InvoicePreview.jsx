@@ -94,6 +94,21 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
     totalTtc: produits.some((p) => !estVide(p.total_ttc)),
   };
 
+  // Collecter toutes les cles uniques de champs_supplementaires produits
+  const proSupKeys = [];
+  produits.forEach(p => {
+    if (p.champs_supplementaires) {
+      Object.keys(p.champs_supplementaires).forEach(k => {
+        if (!proSupKeys.includes(k)) proSupKeys.push(k);
+      });
+    }
+  });
+
+  // Filtrer les champs supplementaires client non vides
+  const clientSupEntries = c.champs_supplementaires
+    ? Object.entries(c.champs_supplementaires).filter(([, v]) => !estVide(v) && typeof v !== 'object')
+    : [];
+
   const clientNom = [c.nom, c.prenom].filter((v) => !estVide(v)).join(" ");
   const estPaye = f.etat && f.etat.toUpperCase() === "PAYE";
 
@@ -144,7 +159,7 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
       </Card>
 
       {/* Infos client */}
-      {(clientNom || c.code_client || c.adresse) && (
+      {(clientNom || c.code_client || c.adresse || clientSupEntries.length > 0) && (
         <Card>
           <CardHeader>
             <div className="flex items-center gap-3">
@@ -160,6 +175,11 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
               <Champ label="Code client" valeur={c.code_client} />
               <Champ label="Adresse" valeur={c.adresse} />
               <Champ label="Téléphone" valeur={c.telephone} />
+              <Champ label="Matricule fiscal" valeur={c.matricule_fiscal} />
+              {clientSupEntries.map(([key, value]) => {
+                const label = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                return <Champ key={key} label={label} valeur={value} />;
+              })}
             </div>
           </CardContent>
         </Card>
@@ -186,6 +206,11 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
                 {colonnes.remise && <th className="py-2 px-3 font-medium text-center">Remise</th>}
                 {colonnes.totalHt && <th className="py-2 px-3 font-medium text-right">Total HT</th>}
                 {colonnes.totalTtc && <th className="py-2 pl-3 font-medium text-right">Total TTC</th>}
+                {proSupKeys.map(key => (
+                  <th key={key} className="py-2 px-3 font-medium text-center text-[11px]">
+                    {key.replace(/_/g, ' ')}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -216,6 +241,14 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
                       {formatMontant(p.total_ttc, devise)}
                     </td>
                   )}
+                  {proSupKeys.map(key => {
+                    const val = p.champs_supplementaires?.[key];
+                    return (
+                      <td key={key} className="py-2.5 px-3 text-center text-text-muted text-xs">
+                        {estVide(val) ? "—" : String(val)}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>

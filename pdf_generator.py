@@ -150,6 +150,11 @@ def json_vers_pdf(facture: dict, filename: str = None) -> str:
         ("Matricule fiscal", c.get("matricule_fiscal") or ""),
     ]
     client_rows = [(k, v) for k, v in client_rows if v and str(v).strip()]
+    # Ajouter les champs supplementaires client
+    cli_champs_sup = c.get("champs_supplementaires") or {}
+    for k, v in cli_champs_sup.items():
+        if v not in (None, "", -9999, [], {}):
+            client_rows.append((libelle_remarque(k), formater_valeur_remarque(v)))
     client_data = [
         [Paragraph(safe(k), client_label_style), Paragraph(safe(v), cell_style)]
         for k, v in client_rows
@@ -199,6 +204,17 @@ def json_vers_pdf(facture: dict, filename: str = None) -> str:
         prod_headers.append("Total TTC")
         col_widths.append(2.4 * cm)
 
+    # Collecter les cles uniques de champs_supplementaires dans les produits
+    pro_champs_sup_keys = []
+    for p in produits:
+        sup = p.get("champs_supplementaires") or {}
+        for k in sup:
+            if k not in pro_champs_sup_keys:
+                pro_champs_sup_keys.append(k)
+    for k in pro_champs_sup_keys:
+        prod_headers.append(k)
+        col_widths.append(2.5 * cm)
+
     # Ligne d'en-tete en Paragraph (pour un wrap propre meme sur l'en-tete)
     prod_data = [[Paragraph(safe(h), cell_header_style) for h in prod_headers]]
 
@@ -221,6 +237,16 @@ def json_vers_pdf(facture: dict, filename: str = None) -> str:
             row.append(Paragraph(safe(fmt(p.get("total_ht_ligne"), decimals)), cell_style_center))
         if has_ttc:
             row.append(Paragraph(safe(fmt(p.get("total_ttc"), decimals)), cell_style_center))
+        # Ajouter les champs supplementaires
+        pro_champs_sup = p.get("champs_supplementaires") or {}
+        for k in pro_champs_sup_keys:
+            val = pro_champs_sup.get(k)
+            if val in (None, NULL_VAL):
+                row.append(Paragraph("-", cell_style_center))
+            elif isinstance(val, (dict, list)):
+                row.append(Paragraph(safe(formater_valeur_remarque(val)), cell_style))
+            else:
+                row.append(Paragraph(safe(str(val)), cell_style_center))
         prod_data.append(row)
 
     t_prod = Table(prod_data, colWidths=col_widths, repeatRows=1)

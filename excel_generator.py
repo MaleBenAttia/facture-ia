@@ -90,9 +90,19 @@ def json_vers_excel(facture: dict):
     c["numero_facture"] = f.get("numero_facture")
     # Filtrer les colonnes vides pour ce client
     cli_headers = [h for h in cli_headers if c.get(h) not in (None, "", -9999)]
+    # Ajouter les champs supplementaires client
+    cli_champs_sup = c.get("champs_supplementaires") or {}
+    cli_champs_sup_keys = [k for k, v in cli_champs_sup.items() if v not in (None, "", -9999, [], {})]
+    cli_headers.extend(cli_champs_sup_keys)
     write_headers(ws_cli, cli_headers)
     for col, h in enumerate(cli_headers, 1):
-        ws_cli.cell(2, col, c.get(h))
+        if h in cli_champs_sup_keys:
+            val = cli_champs_sup.get(h)
+            if isinstance(val, (dict, list)):
+                val = str(val)
+            ws_cli.cell(2, col, val)
+        else:
+            ws_cli.cell(2, col, c.get(h))
 
     # --- Feuille Produits ---
     has_remise = any(p.get("remise_pct") not in (None, "", -9999) for p in produits)
@@ -106,12 +116,28 @@ def json_vers_excel(facture: dict):
     if has_total_ht: pro_headers.append("total_ht_ligne")
     if has_total_ttc: pro_headers.append("total_ttc")
 
+    # Collecter toutes les cles uniques de champs_supplementaires dans les produits
+    pro_champs_sup_keys = []
+    for p in produits:
+        sup = p.get("champs_supplementaires") or {}
+        for k in sup:
+            if k not in pro_champs_sup_keys:
+                pro_champs_sup_keys.append(k)
+    pro_headers.extend(pro_champs_sup_keys)
+
     write_headers(ws_pro, pro_headers)
     for row_idx, p in enumerate(produits, 2):
         p["numero_facture"] = f.get("numero_facture")
+        pro_champs_sup = p.get("champs_supplementaires") or {}
         for col, h in enumerate(pro_headers, 1):
-            val = p.get(h)
-            ws_pro.cell(row_idx, col, val if val not in (-9999,) else None)
+            if h in pro_champs_sup_keys:
+                val = pro_champs_sup.get(h)
+                if isinstance(val, (dict, list)):
+                    val = str(val)
+                ws_pro.cell(row_idx, col, val if val not in (-9999,) else None)
+            else:
+                val = p.get(h)
+                ws_pro.cell(row_idx, col, val if val not in (-9999,) else None)
 
     wb.save(filepath)
     return filename
