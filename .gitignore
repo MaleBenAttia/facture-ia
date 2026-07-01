@@ -16,8 +16,6 @@ build/
 !.env.example
 
 # ─── Fichiers générés par l'application ───────────────
-uploads/
-outputs/
 usage_counter.json
 imagetraiter/*.png
 
