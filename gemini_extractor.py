@@ -1,6 +1,6 @@
 from google import genai
 from google.genai import types
-import json, os, threading
+import json, os, threading, time
 from pathlib import Path
 from datetime import date, datetime
 from dotenv import load_dotenv
@@ -58,22 +58,36 @@ def sauver_compteur(data):
     with open(FICHIER, "w") as f:
         json.dump(data, f)
 
-def _appeler_gemini(api_key: str, image_data: bytes, mime_type: str, prompt: str):
-    """Effectue un appel Gemini avec la clé fournie. Lève une exception si erreur."""
-    # Guard explicite : détecte les clés None/vides avant l'appel SDK
+def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: int = 3):
+    """
+    Effectue un appel Gemini avec la clé fournie.
+    pages_data: liste de tuples (image_data: bytes, mime_type: str) — une par page.
+    max_retries: nombre de tentatives en cas de 503 (surcharge).
+    Lève une exception si toutes les tentatives échouent.
+    """
     if not api_key or not api_key.strip():
         raise ValueError(
             "api_key est vide ou None. Vérifiez GEMINI_API_KEY1 / GEMINI_API_KEY2 dans .env"
         )
     client = genai.Client(api_key=api_key.strip())
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=[
-            types.Part.from_bytes(data=image_data, mime_type=mime_type),
-            prompt
-        ]
-    )
-    return response
+    contents = [types.Part.from_bytes(data=data, mime_type=mime)
+                for data, mime in pages_data] + [prompt]
+    for tentative in range(1, max_retries + 1):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=contents
+            )
+            return response
+        except Exception as e:
+            est_503 = "503" in str(e) or "UNAVAILABLE" in str(e)
+            if est_503 and tentative < max_retries:
+                attente = 2 ** tentative
+                print(f"  [API]  503 (tentative {tentative}/{max_retries}) — nouvel essai dans {attente}s...")
+                time.sleep(attente)
+                continue
+            raise
+    raise RuntimeError("Impossible d'atteindre Gemini après plusieurs tentatives.")
 
 
 def extraire_facture(image_path: str, content_type: str = "image/png", cancel_event=None) -> dict:
@@ -100,28 +114,42 @@ def extraire_facture(image_path: str, content_type: str = "image/png", cancel_ev
     if cancel_event and cancel_event.is_set():
         raise InterruptedError("Job annulé par l'utilisateur.")
 
-    # ── Lecture et préprocessing de l'image ────────────────────────────────
+    # ── Lecture et préprocessing de l'image (multi‑pages supporté) ────────
 
     with open(image_path, "rb") as f:
         file_bytes = f.read()
     print(f"  [PREPROC] Fichier original: {len(file_bytes)/1024:.1f} Ko, type: {content_type}")
-    img_bgr = preparer_image_pour_llm(file_bytes, content_type)
-    if img_bgr is None or img_bgr.size == 0:
-        raise ValueError("L'image prétraitée est vide")
-    print(f"  [PREPROC] Image prétraitée: {img_bgr.shape[1]}x{img_bgr.shape[0]} px, encodage PNG...")
-    success, buffer = cv2.imencode(".png", img_bgr)
-    if not success or buffer is None or len(buffer) == 0:
-        raise ValueError("Échec de l'encodage PNG")
-    image_data = buffer.tobytes()
-    mime_type = "image/png"
+    images_bgr = preparer_image_pour_llm(file_bytes, content_type)
+    if not images_bgr:
+        raise ValueError("Aucune image extraite du fichier")
+    print(f"  [PREPROC] {len(images_bgr)} page(s) prétraitée(s), encodage PNG...")
+    MAX_LONG_COTE = 1200
+    pages_data = []
+    for i, img_bgr in enumerate(images_bgr):
+        h, w = img_bgr.shape[:2]
+        if len(images_bgr) > 1 and max(w, h) > MAX_LONG_COTE:
+            echelle = MAX_LONG_COTE / max(w, h)
+            nouvelle = (int(w * echelle), int(h * echelle))
+            img_bgr = cv2.resize(img_bgr, nouvelle, interpolation=cv2.INTER_AREA)
+        success, buffer = cv2.imencode(".png", img_bgr)
+        if not success or buffer is None or len(buffer) == 0:
+            raise ValueError(f"Échec de l'encodage PNG pour la page {i+1}")
+        image_data = buffer.tobytes()
+        pages_data.append((image_data, "image/png"))
+        print(f"  [PREPROC]   Page {i+1}: {img_bgr.shape[1]}x{img_bgr.shape[0]} px, {len(image_data)/1024:.1f} Ko")
     os.makedirs("imagetraiter", exist_ok=True)
-    with open("imagetraiter/derniere_image.png", "wb") as f:
-        f.write(image_data)
-    print(f"  [PREPROC] Image sauvegardée dans imagetraiter/derniere_image.png ({len(image_data)/1024:.1f} Ko)")
-    print(f"  [PREPROC] Envoi à Gemini: {len(image_data)/1024:.1f} Ko (PNG)")
+    for i, (data, _) in enumerate(pages_data):
+        with open(f"imagetraiter/page_{i+1}.png", "wb") as f:
+            f.write(data)
+    total_ko = sum(len(d) for d, _ in pages_data) / 1024
+    print(f"  [PREPROC] {len(pages_data)} page(s) sauvegardée(s) dans imagetraiter/page_*.png")
+    print(f"  [PREPROC] Envoi à Gemini: {len(pages_data)} page(s), {total_ko:.1f} Ko total")
 
     prompt = """
 Tu es un expert-comptable senior et analyste financier specialise dans les factures du Maghreb, d'Europe et du Moyen-Orient.
+Cette facture peut contenir plusieurs pages fournies ci-dessous. Utilise TOUTES les pages pour extraire les donnees.
+
+
 Ton travail est d'extraire les donnees avec une precision maximale ET d'identifier tout element anormal ou suspect.
 
 ════════════════════════════════════════
@@ -165,6 +193,31 @@ CHAMPS A EXTRAIRE :
 - matricule_fiscal : cherche "M.F", "MF", "NIF", "Matricule", "ICE", "SIRET", "SIREN".
 - societe_tel / societe_email : Extraire le contact principal. S'il y a PLUSIEURS numéros ou emails, place les autres EXCLUSIVEMENT dans `champs_supplementaires` avec des clés explicites (ex: "gsm1", "gsm2", "fixe", "email2").
 - champs_supplementaires : tout champ visible non couvert par le schema (dont les numéros/emails supplémentaires).
+
+PRODUITS — GARDER LES NOMS DE COLONNES EXACTS DE LA FACTURE (obligatoire) :
+- Ne remplace PAS les noms de colonnes originaux par les noms du schema.
+- Si la facture a "Article" comme colonne, tu ecris "Article", pas "designation".
+- Si la facture a "Qté", tu ecris "Qté", pas "quantite".
+- Tu dois EN MEME TEMPS remplir les champs standards (designation, quantite, prix_u_ht...) en DEDUISANT depuis les colonnes de la facture.
+- Mais les colonnes originales avec leurs noms EXACTS doivent etre dans `champs_supplementaires`.
+
+EXEMPLE CONCRET :
+  Facture avec colonnes : "Article", "Qté", "PU HT", "Montant"
+  Resultat attendu :
+  {
+    "numero_ligne": 1,
+    "designation": "Stylo bleu",
+    "quantite": 10,
+    "prix_u_ht": 2.5,
+    "total_ht_ligne": 25.0,
+    "champs_supplementaires": {
+      "Article": "Stylo bleu",
+      "Qté": 10,
+      "PU HT": 2.5,
+      "Montant": 25.0
+    }
+  }
+  Les noms "Article", "Qté", "PU HT", "Montant" sont PRESERVES textuellement.
 
 ════════════════════════════════════════
 PARTIE 2 — VERIFICATION MATHEMATIQUE
@@ -225,7 +278,10 @@ FORMAT JSON FINAL :
       "remise_pct": -9999,
       "total_ht_ligne": -9999,
       "total_ttc": -9999,
-      "champs_supplementaires": {}
+      "champs_supplementaires": {
+        "Article": "valeur de la colonne Article",
+        "Qté": 0
+      }
     }
   ],
   "analyse": {
@@ -251,7 +307,7 @@ FORMAT JSON FINAL :
     for index, api_key in enumerate(cles_actives, start=1):
         try:
             print(f"\n  [API] Tentative avec la clé n°{index}...")
-            response     = _appeler_gemini(api_key, image_data, mime_type, prompt)
+            response     = _appeler_gemini(api_key, pages_data, prompt)
             api_utilisee = index
             print(f"  [API] ✅ Clé n°{index} a répondu avec succès.")
             break
