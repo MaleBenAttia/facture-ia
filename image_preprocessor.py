@@ -158,7 +158,7 @@ def pipeline_adaptatif_complet(img_bgr, verbose: bool = True):
         nouvelle_taille = (int(w * facteur_reduction), int(h * facteur_reduction))
         img = cv2.resize(img, nouvelle_taille, interpolation=cv2.INTER_AREA)
         img = ameliorer_texte(img)
-        if verbose: print(f"[preprocessing] → Grande image: réduite à {nouvelle_taille} + sharpening")
+        if verbose: print(f"[preprocessing] -> Grande image: reduite a {nouvelle_taille} + sharpening")
 
     return img
 
@@ -184,8 +184,8 @@ def preparer_image_pour_llm(file_bytes: bytes, content_type: str, verbose: bool 
     """
     images_bgr, type_contenu = extraire_image_de_lentree(file_bytes, content_type)
 
-    # Pipeline minimal sur TOUTES les images (même PDF natif)
-    # Redimensionne si trop petit + léger contraste pour aider Gemini à lire le texte
-    images_bgr = [_preprocessing_minimal(img, verbose=verbose) for img in images_bgr]
+    # Pipeline complet sur TOUTES les images (Upscale + CLAHE + Bilateral + Sharpening)
+    # Le filtre d'ombre est desactive (abime le logo)
+    images_bgr = [pipeline_adaptatif_complet(img, verbose=verbose) for img in images_bgr]
 
     return images_bgr
