@@ -219,6 +219,12 @@ CHAMPS A EXTRAIRE :
 - societe_tel / societe_email : Extraire le contact principal. S'il y a PLUSIEURS numéros ou emails, place les autres EXCLUSIVEMENT dans `champs_supplementaires` avec des clés explicites (ex: "gsm1", "gsm2", "fixe", "email2").
 - champs_supplementaires : tout champ visible non couvert par le schema (dont les numéros/emails supplémentaires).
 
+FACTURE ET CLIENT — AUSSI DYNAMIQUES VIA champs_supplementaires (obligatoire) :
+- `champs_supplementaires` dans `facture` DOIT contenir TOUS les champs du haut de facture avec leurs noms EXACTS (numero facture, date, nom societe, adresse, MF, RC, téléphone, fax, email, total ht, tva, timbre, net a payer, mode reglement, etc.).
+- `champs_supplementaires` dans `client` DOIT contenir TOUS les champs client avec leurs noms EXACTS (code client, nom, prenom, telephone, adresse, matricule fiscal, service achats, contact, etc.).
+- Les champs standards sont remplis EN PLUS, par déduction depuis les champs originaux.
+- AUCUN champ visible ne doit être perdu.
+
 PRODUITS — 100% DYNAMIQUE VIA champs_supplementaires (obligatoire) :
 - Les colonnes du tableau de facture changent selon le fournisseur.
 - `champs_supplementaires` DOIT contenir TOUTES les colonnes visibles avec leurs noms EXACTS.
@@ -280,7 +286,14 @@ FORMAT JSON FINAL :
     "mode_reglement": null,
     "etat": null,
     "remarques": null,
-    "champs_supplementaires": {}
+    "champs_supplementaires": {
+      "N° Facture": "FAC-2026-0001",
+      "Date": "01/07/2026",
+      "Client": "NOM DU CLIENT",
+      "MF": "1234567/A/M/000",
+      "Adresse": "Adresse complete",
+      "Tel": "71 000 000"
+    }
   },
   "client": {
     "code_client": null,
@@ -289,7 +302,11 @@ FORMAT JSON FINAL :
     "telephone": null,
     "adresse": null,
     "matricule_fiscal": null,
-    "champs_supplementaires": {}
+    "champs_supplementaires": {
+      "Code client": "CL-001",
+      "Service Achats": "M. Nom Prenom",
+      "Contact": "contact@email.tn"
+    }
   },
   "produits": [
     {
