@@ -77,7 +77,7 @@ def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: in
     for tentative in range(1, max_retries + 1):
         try:
             response = client.models.generate_content(
-                model="gemini-1.5-flash",
+                model="gemini-2.0-flash",
                 contents=contents
             )
             return response
