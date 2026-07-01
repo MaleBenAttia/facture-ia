@@ -8,6 +8,16 @@ from dotenv import load_dotenv
 import cv2
 from image_preprocessor import preparer_image_pour_llm
 
+# ─── Vérification : google-genai (nouveau SDK buggé) ne doit PAS être installé ──
+try:
+    import google.genai
+    print("⚠️  ATTENTION : 'google-genai' (nouveau SDK) est installé et entre en conflit avec google.generativeai.")
+    print("   Exécutez cette commande pour le supprimer :")
+    print("      pip uninstall google-genai -y")
+    print("   Puis redémarrez le serveur.")
+except ImportError:
+    pass  # google-genai non installé → tout va bien
+
 # Charge le .env depuis le répertoire du fichier lui-même (indépendant du cwd)
 _ENV_PATH = Path(__file__).resolve().parent / ".env"
 load_dotenv(dotenv_path=_ENV_PATH, override=True)
