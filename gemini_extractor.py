@@ -201,6 +201,8 @@ REGLES ABSOLUES :
 - Champ absent ou illisible → null exactement.
 - Valeur numerique absente → -9999. Ne jamais inventer.
 - Valeur explicitement 0 dans la facture → 0.0.
+- TOUT le texte dans le JSON doit etre en FRANCAIS. Les alertes, messages, remarques, et tout champ texte doit etre redige en francais.
+- Les produits dans le tableau "produits" doivent etre dans l'ORDRE CROISSANT de "numero_ligne" (ligne 1, ligne 2, ligne 3...). Ne jamais melanger l'ordre.
 
 DETECTION GEOGRAPHIQUE ET DEVISE (critique) :
 Analyse tous les indices : langue, ville, code postal, mentions legales, matricule fiscal, symbole monetaire.
@@ -235,17 +237,19 @@ CHAMPS A EXTRAIRE :
 - champs_supplementaires : tout champ visible non couvert par le schema (dont les numéros/emails supplémentaires).
 
 FACTURE ET CLIENT — AUSSI DYNAMIQUES VIA champs_supplementaires (obligatoire) :
-- `champs_supplementaires` dans `facture` DOIT contenir TOUS les champs du haut de facture avec leurs noms EXACTS (numero facture, date, nom societe, adresse, MF, RC, téléphone, fax, email, total ht, tva, timbre, net a payer, mode reglement, etc.).
+- `champs_supplementaires` dans `facture` DOIT contenir TOUS les champs du haut de facture avec leurs noms EXACTS (numero facture, date, nom societe, adresse, MF, RC, telephone, fax, email, total ht, tva, timbre, net a payer, mode reglement, etc.).
 - `champs_supplementaires` dans `client` DOIT contenir TOUS les champs client avec leurs noms EXACTS (code client, nom, prenom, telephone, adresse, matricule fiscal, service achats, contact, etc.).
-- Les champs standards sont remplis EN PLUS, par déduction depuis les champs originaux.
-- AUCUN champ visible ne doit être perdu.
+- Les champs standards sont remplis EN PLUS, par deduction depuis les champs originaux.
+- AUCUN champ visible ne doit etre perdu.
+- L'ordre des champs dans `champs_supplementaires` doit respecter l'ordre original d'apparition sur la facture (de haut en bas, de gauche a droite).
 
 PRODUITS — 100% DYNAMIQUE VIA champs_supplementaires (obligatoire) :
 - Les colonnes du tableau de facture changent selon le fournisseur.
 - `champs_supplementaires` DOIT contenir TOUTES les colonnes visibles avec leurs noms EXACTS.
-- Peu importe les colonnes : "Famille", "Catégorie", "Article", "Code", "Couleur", "Taille", "Unité", "Poids" → tout va dans `champs_supplementaires` avec le nom exact.
-- Les champs standards (designation, quantite...) sont remplis par déduction.
-- Mais AUCUNE colonne ne doit être perdue. Si la facture a 5 colonnes, `champs_supplementaires` a 5 entrées.
+- Peu importe les colonnes : "Famille", "Categorie", "Article", "Code", "Couleur", "Taille", "Unite", "Poids" → tout va dans `champs_supplementaires` avec le nom exact.
+- Les champs standards (designation, quantite...) sont remplis par deduction.
+- Mais AUCUNE colonne ne doit etre perdue. Si la facture a 5 colonnes, `champs_supplementaires` a 5 entrees.
+- L'ordre des colonnes dans `champs_supplementaires` doit respecter l'ordre original du tableau dans la facture (de gauche a droite).
 
 EXEMPLE :
   Facture avec colonnes : "Famille", "Article", "Qté", "PU", "Total"
@@ -273,10 +277,10 @@ REGLES ABSOLUES - NE PAS DEVIER :
 - AUTORISE UNIQUEMENT : verifier si total_ht + montant_tva + timbre_fiscal = net_a_payer (tolerance 1%).
 
 CAS 1 - Tout est correct (ou champs manquants) :
-  alertes: [{"type": "success", "message": "Calculs vérifiés."}]
+  alertes: [{"type": "success", "message": "Calculs verifies. Aucune erreur detectee."}]
 
 CAS 2 - Erreur de calcul uniquement :
-  alertes: [{"type": "erreur", "message": "Total attendu : X. Affiché : Y. Écart : Z."}]
+  alertes: [{"type": "erreur", "message": "Erreur de calcul : Total attendu : X. Affiche : Y. Ecart : Z."}]
 
 FORMAT JSON FINAL :
 {
