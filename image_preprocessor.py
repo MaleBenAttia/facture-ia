@@ -68,7 +68,7 @@ def extraire_image_de_lentree(file_bytes: bytes, content_type: str):
         elif nb_images_embarquees > 0:
             return extraire_images_embarquees(file_bytes), "scan"
         else:
-            return pdf_vers_images(file_bytes, dpi=200), "natif"
+            return pdf_vers_images(file_bytes, dpi=300), "natif"
     else:
         nparr = np.frombuffer(file_bytes, np.uint8)
         img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -173,10 +173,8 @@ def preparer_image_pour_llm(file_bytes: bytes, content_type: str, verbose: bool 
     """
     images_bgr, type_contenu = extraire_image_de_lentree(file_bytes, content_type)
 
-    if type_contenu == "scan":
-        # Pipeline minimal : redimensionnement si trop petit + léger contraste
-        images_bgr = [_preprocessing_minimal(img, verbose=verbose) for img in images_bgr]
-    else:
-        if verbose: print(f"[preprocessing] ✗ PDF natif: aucun filtre appliqué ({len(images_bgr)} page(s))")
+    # Pipeline minimal sur TOUTES les images (même PDF natif)
+    # Redimensionne si trop petit + léger contraste pour aider Gemini à lire le texte
+    images_bgr = [_preprocessing_minimal(img, verbose=verbose) for img in images_bgr]
 
     return images_bgr
