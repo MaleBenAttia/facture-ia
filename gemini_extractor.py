@@ -194,33 +194,28 @@ CHAMPS A EXTRAIRE :
 - societe_tel / societe_email : Extraire le contact principal. S'il y a PLUSIEURS numéros ou emails, place les autres EXCLUSIVEMENT dans `champs_supplementaires` avec des clés explicites (ex: "gsm1", "gsm2", "fixe", "email2").
 - champs_supplementaires : tout champ visible non couvert par le schema (dont les numéros/emails supplémentaires).
 
-PRODUITS — CHAMPS :
-- famille : categorie/produit famille (ex: "Informatique", "Bureau", "Epicerie"). null si absent.
+PRODUITS — 100% DYNAMIQUE VIA champs_supplementaires (obligatoire) :
+- Les colonnes du tableau de facture changent selon le fournisseur.
+- `champs_supplementaires` DOIT contenir TOUTES les colonnes visibles avec leurs noms EXACTS.
+- Peu importe les colonnes : "Famille", "Catégorie", "Article", "Code", "Couleur", "Taille", "Unité", "Poids" → tout va dans `champs_supplementaires` avec le nom exact.
+- Les champs standards (designation, quantite...) sont remplis par déduction.
+- Mais AUCUNE colonne ne doit être perdue. Si la facture a 5 colonnes, `champs_supplementaires` a 5 entrées.
 
-PRODUITS — GARDER LES NOMS DE COLONNES EXACTS DE LA FACTURE (obligatoire) :
-- Ne remplace PAS les noms de colonnes originaux par les noms du schema.
-- Si la facture a "Article" comme colonne, tu ecris "Article", pas "designation".
-- Si la facture a "Qté", tu ecris "Qté", pas "quantite".
-- Tu dois EN MEME TEMPS remplir les champs standards (designation, quantite, prix_u_ht...) en DEDUISANT depuis les colonnes de la facture.
-- Mais les colonnes originales avec leurs noms EXACTS doivent etre dans `champs_supplementaires`.
-
-EXEMPLE CONCRET :
-  Facture avec colonnes : "Article", "Qté", "PU HT", "Montant"
-  Resultat attendu :
+EXEMPLE :
+  Facture avec colonnes : "Famille", "Article", "Qté", "PU", "Total"
   {
-    "numero_ligne": 1,
-    "designation": "Stylo bleu",
+    "designation": "Stylo",
     "quantite": 10,
     "prix_u_ht": 2.5,
     "total_ht_ligne": 25.0,
     "champs_supplementaires": {
-      "Article": "Stylo bleu",
+      "Famille": "Bureau",
+      "Article": "Stylo",
       "Qté": 10,
-      "PU HT": 2.5,
-      "Montant": 25.0
+      "PU": 2.5,
+      "Total": 25.0
     }
   }
-  Les noms "Article", "Qté", "PU HT", "Montant" sont PRESERVES textuellement.
 
 ════════════════════════════════════════
 PARTIE 2 — VERIFICATION MATHEMATIQUE
@@ -274,7 +269,6 @@ FORMAT JSON FINAL :
   "produits": [
     {
       "numero_ligne": 1,
-      "famille": null,
       "designation": null,
       "quantite": -9999,
       "prix_u_ht": -9999,
