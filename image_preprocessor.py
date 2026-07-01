@@ -9,13 +9,24 @@ import cv2
 import numpy as np
 
 
+MIN_DIMENSION = 1000  # pixels minimum sur le plus court cote
+
 # ---------- Extraction depuis PDF (3 cas) ou image ----------
 def pdf_vers_images(pdf_bytes: bytes, dpi: int = 300) -> list:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    zoom_f = dpi / 72
-    mat = fitz.Matrix(zoom_f, zoom_f)
     images = []
     for page in doc:
+        page_w = page.rect.width
+        page_h = page.rect.height
+        rendered_w = int(page_w * dpi / 72)
+        rendered_h = int(page_h * dpi / 72)
+        effective_dpi = dpi
+        shortest = min(rendered_w, rendered_h)
+        if shortest < MIN_DIMENSION and shortest > 0:
+            effective_dpi = int(dpi * MIN_DIMENSION / shortest)
+            print(f"  [PREPROC] Page {rendered_w}x{rendered_h}px trop petite → re-render a {effective_dpi} DPI")
+        zoom_f = effective_dpi / 72
+        mat = fitz.Matrix(zoom_f, zoom_f)
         pix = page.get_pixmap(matrix=mat)
         img_array = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
         if pix.n == 4:
