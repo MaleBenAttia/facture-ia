@@ -113,7 +113,14 @@ export async function traiterFacture(file, signal, onJobStarted) {
         // Étape 3 : récupérer les données complètes dans une requête dédiée
         const resData = await fetch(`${API_BASE}/result/${jobId}`, { signal });
         if (!resData.ok) continue;
-        const { data } = await resData.json();
+        let responseData;
+        try {
+          responseData = await resData.json();
+        } catch (parseErr) {
+          console.error("Erreur parsing JSON result:", parseErr, "Response text length:", (await resData.clone().text()).length);
+          throw new ApiError("Erreur parsing réponse serveur (JSON trop volumineux ou invalide)", 500);
+        }
+        const { data } = responseData;
         return { data, excel: job.excel, pdf: job.pdf };
       }
       if (job.status === "error") {

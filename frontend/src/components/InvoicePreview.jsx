@@ -84,19 +84,23 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
   if (!resultat) return null;
   const { facture: f = {}, client: c = {}, produits = [] } = resultat.data || {};
   
+  // Limiter l'affichage à 50 produits max pour éviter les plantages de rendu
+  const produitsAffiches = produits.slice(0, 50);
+  const produitsTronques = produits.length > 50;
+  
   // Utiliser la devise détectée par l'IA si disponible, sinon repli sur celle du thème
   const devise = resultat.data?.analyse?.devise_detecte || THEME.devise;
 
   const colonnes = {
-    tva: produits.some((p) => !estVide(p.tva_pct)),
-    remise: produits.some((p) => !estVide(p.remise_pct) && p.remise_pct !== 0),
-    totalHt: produits.some((p) => !estVide(p.total_ht_ligne)),
-    totalTtc: produits.some((p) => !estVide(p.total_ttc)),
+    tva: produitsAffiches.some((p) => !estVide(p.tva_pct)),
+    remise: produitsAffiches.some((p) => !estVide(p.remise_pct) && p.remise_pct !== 0),
+    totalHt: produitsAffiches.some((p) => !estVide(p.total_ht_ligne)),
+    totalTtc: produitsAffiches.some((p) => !estVide(p.total_ttc)),
   };
 
   // Collecter toutes les cles uniques de champs_supplementaires produits
   const proSupKeys = [];
-  produits.forEach(p => {
+  produitsAffiches.forEach(p => {
     if (p.champs_supplementaires) {
       Object.keys(p.champs_supplementaires).forEach(k => {
         if (!proSupKeys.includes(k)) proSupKeys.push(k);
@@ -185,14 +189,21 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
         </Card>
       )}
 
-      {/* Tableau produits */}
+{/* Tableau produits */}
       <Card>
         <CardHeader>
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/8 text-ink">
               <Receipt className="h-5 w-5" />
             </div>
-            <CardTitle>Produits ({produits.length})</CardTitle>
+            <CardTitle>
+              Produits ({produits.length})
+              {produitsTronques && (
+                <span className="ml-2 text-xs font-normal text-orange-500">
+                  (affichage limité à 50)
+                </span>
+              )}
+            </CardTitle>
           </div>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -219,7 +230,7 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {produits.map((p, i) => (
+              {produitsAffiches.map((p, i) => (
                 <tr key={i} className="text-ink">
                   {proSupKeys.length > 0 ? (
                     proSupKeys.map(key => {
@@ -261,6 +272,13 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
                   )}
                 </tr>
               ))}
+              {produitsTronques && (
+                <tr className="bg-amber-50/20">
+                  <td colSpan={proSupKeys.length > 0 ? proSupKeys.length : 8} className="py-3 text-center text-amber-600 text-xs font-medium">
+                    ... et {produits.length - 50} autres produits (voir Excel/PDF complets)
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </CardContent>
