@@ -14,16 +14,20 @@ const MESSAGES = [
   "Finalisation de l'extraction…",
 ];
 
-export function ScanZone({ onFileReady, onScanConfirm, etat, progression, fichierActuel, previewProcessedUrl, onAnnuler }) {
+export function ScanZone({ onFileReady, onScanConfirm, etat, progression, fichierActuel, previewProcessedUrl, dureeTraitement, onAnnuler }) {
   const [erreurLocale, setErreurLocale] = useState(null);
   const [messageIndex, setMessageIndex] = useState(0);
+  const [timerLocal, setTimerLocal] = useState(0);
 
   useEffect(() => {
     let interval;
     if (etat === "traitement") {
+      setTimerLocal(0);
+      const debut = Date.now();
       interval = setInterval(() => {
+        setTimerLocal(((Date.now() - debut) / 1000).toFixed(1));
         setMessageIndex((prev) => (prev + 1) % MESSAGES.length);
-      }, 2500);
+      }, 100);
     } else {
       setMessageIndex(0);
     }
@@ -249,7 +253,7 @@ export function ScanZone({ onFileReady, onScanConfirm, etat, progression, fichie
               <div className="w-full">
                 <div className="flex items-center justify-between mb-1.5">
                   <span className="text-xs font-bold" style={{ color: "var(--color-text-muted)" }}>Traitement IA</span>
-                  <span className="text-xs font-extrabold font-mono" style={{ color: "#E63946" }}>{progression}%</span>
+                  <span className="text-xs font-extrabold font-mono" style={{ color: "#E63946" }}>{timerLocal}s</span>
                 </div>
                 <div className="h-2 w-full overflow-hidden rounded-full"
                   style={{ backgroundColor: "rgba(0,0,0,0.06)" }}>

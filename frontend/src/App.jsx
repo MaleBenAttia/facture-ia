@@ -46,6 +46,7 @@ function AppContenu() {
   const [telechargement,      setTelechargement]      = useState(null);
   const [historique,          setHistorique]          = useState([]);
   const [selectionneeId,      setSelectionneeId]      = useState(null);
+  const [dureeTraitement,     setDureeTraitement]     = useState(null);
 
   // Nettoie l'URL du preview quand elle change ou au démontage
   useEffect(() => {
@@ -78,6 +79,8 @@ function AppContenu() {
     if (!fichierActuel) return;
     setEtat("traitement");
     setProgression(3);
+    setDureeTraitement(null);
+    const debutTimer = Date.now();
 
     // Crée un AbortController pour pouvoir annuler le fetch/polling
     const ctrl = new AbortController();
@@ -108,6 +111,7 @@ function AppContenu() {
       clearInterval(interval);
       if (ctrl.signal.aborted || runIdRef.current !== runId) return;
       setProgression(100);
+      setDureeTraitement(((Date.now() - debutTimer) / 1000).toFixed(1));
       setEtat("succes");
       setResultat(reponse);
       
@@ -243,6 +247,7 @@ function AppContenu() {
                   progression={progression}
                   fichierActuel={fichierActuel}
                   previewProcessedUrl={previewProcessedUrl}
+                  dureeTraitement={dureeTraitement}
                   onFileReady={handleFichierSelect}
                   onScanConfirm={lancerTraitement}
                   onAnnuler={annulerTraitement}
@@ -260,7 +265,14 @@ function AppContenu() {
                 animate="visible"
               >
                 <DarkCard>
-                  <SectionHead label="Résultat de l'extraction" color="#2A9D8F" />
+                  <div className="flex items-center justify-between mb-6">
+                    <SectionHead label="Résultat de l'extraction" color="#2A9D8F" />
+                    {dureeTraitement && (
+                      <span className="text-xs font-bold px-3 py-1 rounded-full" style={{ backgroundColor: "rgba(42,157,143,0.1)", color: "#2A9D8F" }}>
+                        ⏱ {dureeTraitement}s
+                      </span>
+                    )}
+                  </div>
                   <InvoicePreview
                     resultat={resultat}
                     telechargement={telechargement}
