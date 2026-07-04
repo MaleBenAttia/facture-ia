@@ -1,4 +1,3 @@
-import google.generativeai as genai
 import PIL.Image
 import io
 import json, os, threading, time
