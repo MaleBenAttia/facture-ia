@@ -67,7 +67,7 @@ def sauver_compteur(data):
     with open(FICHIER, "w") as f:
         json.dump(data, f)
 
-def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: int = 2, text_content: str = None):
+def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: int = 3, text_content: str = None):
     """
     Effectue un appel Gemini avec le nouveau SDK google-genai.
     Essaye chaque modèle dans MODELES jusqu'à en trouver un qui répond.
@@ -96,6 +96,8 @@ def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: in
         thinking_config=types.ThinkingConfig(thinking_budget=8000)
     )
 
+    import re as _re
+
     dernier_erreur = None
     for modele in MODELES:
         for tentative in range(1, max_retries + 1):
@@ -116,11 +118,22 @@ def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: in
                 est_image = "image" in msg.lower() and "not support" in msg.lower()
 
                 if est_503 and tentative < max_retries:
-                    attente = 2 ** tentative
+                    attente = min(2 ** tentative, 10)
                     print(f"  [API]  {modele} 503 (tentative {tentative}/{max_retries}) -- dans {attente}s...")
                     time.sleep(attente)
                     continue
-                if est_429 or est_image or tentative == max_retries:
+
+                if est_429:
+                    match = _re.search(r"retryDelay['\"]?\s*:\s*['\"]?(\d+\.?\d*)s", msg)
+                    wait = float(match.group(1)) if match else 30
+                    wait = min(wait, 60)
+                    if tentative < max_retries:
+                        print(f"  [API]  {modele} 429 (tentative {tentative}/{max_retries}) -- attente {wait:.0f}s...")
+                        time.sleep(wait)
+                        continue
+                    break
+
+                if est_image or tentative == max_retries:
                     break
 
     raise dernier_erreur or RuntimeError("Impossible d'atteindre Gemini.")
