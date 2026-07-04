@@ -20,18 +20,21 @@ export function ScanZone({ onFileReady, onScanConfirm, etat, progression, fichie
   const [timerLocal, setTimerLocal] = useState(0);
 
   useEffect(() => {
-    let interval;
+    let timerInterval;
+    let msgInterval;
     if (etat === "traitement") {
       setTimerLocal(0);
       const debut = Date.now();
-      interval = setInterval(() => {
+      timerInterval = setInterval(() => {
         setTimerLocal(((Date.now() - debut) / 1000).toFixed(1));
-        setMessageIndex((prev) => (prev + 1) % MESSAGES.length);
       }, 100);
+      msgInterval = setInterval(() => {
+        setMessageIndex((prev) => (prev + 1) % MESSAGES.length);
+      }, 5000);
     } else {
       setMessageIndex(0);
     }
-    return () => clearInterval(interval);
+    return () => { clearInterval(timerInterval); clearInterval(msgInterval); };
   }, [etat]);
 
   const onDrop = useCallback(
