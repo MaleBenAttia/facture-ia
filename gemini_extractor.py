@@ -8,16 +8,6 @@ from dotenv import load_dotenv
 import cv2
 from image_preprocessor import preparer_image_pour_llm
 
-# ─── Vérification : google-genai (nouveau SDK buggé) ne doit PAS être installé ──
-try:
-    import google.genai
-    print("⚠️  ATTENTION : 'google-genai' (nouveau SDK) est installé et entre en conflit avec google.generativeai.")
-    print("   Exécutez cette commande pour le supprimer :")
-    print("      pip uninstall google-genai -y")
-    print("   Puis redémarrez le serveur.")
-except ImportError:
-    pass  # google-genai non installé → tout va bien
-
 # Charge le .env depuis le répertoire du fichier lui-même (indépendant du cwd)
 _ENV_PATH = Path(__file__).resolve().parent / ".env"
 load_dotenv(dotenv_path=_ENV_PATH, override=True)
@@ -56,9 +46,9 @@ for i, k in enumerate(GEMINI_API_KEYS, 1):
 print()
 
 
-PRIX_INPUT_PAR_MILLION    = 0.075
-PRIX_OUTPUT_PAR_MILLION   = 0.30
-PRIX_THINKING_PAR_MILLION = 0.075
+PRIX_INPUT_PAR_MILLION    = 0.30
+PRIX_OUTPUT_PAR_MILLION   = 2.50
+PRIX_THINKING_PAR_MILLION = 0.30
 
 def lire_compteur():
     aujourd_hui     = str(date.today())
@@ -80,17 +70,19 @@ def sauver_compteur(data):
 
 def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: int = 2, text_content: str = None):
     """
-    Effectue un appel Gemini avec la clé fournie (SDK google.generativeai).
+    Effectue un appel Gemini avec le nouveau SDK google-genai.
     Essaye chaque modèle dans MODELES jusqu'à en trouver un qui répond.
     pages_data: liste de tuples (image_data: bytes, mime_type: str) — une par page.
     text_content: si fourni, envoie le texte brut au lieu des images.
     Lève une exception si tous les modèles échouent.
     """
+    from google import genai
+    from google.genai import types
+
     if not api_key or not api_key.strip():
-        raise ValueError(
-            "api_key est vide ou None. Vérifiez GEMINI_API_KEY1..6 dans .env"
-        )
-    genai.configure(api_key=api_key.strip())
+        raise ValueError("api_key est vide ou None. Verifiez GEMINI_API_KEY1..6 dans .env")
+
+    client = genai.Client(api_key=api_key.strip())
 
     if text_content is not None:
         contents = [text_content, prompt]
@@ -100,17 +92,22 @@ def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: in
             pil_images.append(PIL.Image.open(io.BytesIO(data)))
         contents = pil_images + [prompt]
 
+    config = types.GenerateContentConfig(
+        max_output_tokens=65536,
+        thinking_config=types.ThinkingConfig(thinking_budget=8000)
+    )
+
     dernier_erreur = None
     for modele in MODELES:
         for tentative in range(1, max_retries + 1):
             try:
-                model = genai.GenerativeModel(modele)
-                response = model.generate_content(
-                    contents,
-                    generation_config=genai.types.GenerationConfig(max_output_tokens=65536)
+                response = client.models.generate_content(
+                    model=modele,
+                    contents=contents,
+                    config=config
                 )
                 if modele != MODELES[0]:
-                    print(f"  [API]  Modèle utilisé: {modele}")
+                    print(f"  [API]  Modele utilise: {modele}")
                 return response
             except Exception as e:
                 dernier_erreur = e
@@ -121,7 +118,7 @@ def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: in
 
                 if est_503 and tentative < max_retries:
                     attente = 2 ** tentative
-                    print(f"  [API]  {modele} 503 (tentative {tentative}/{max_retries}) — dans {attente}s...")
+                    print(f"  [API]  {modele} 503 (tentative {tentative}/{max_retries}) -- dans {attente}s...")
                     time.sleep(attente)
                     continue
                 if est_429 or est_image or tentative == max_retries:
