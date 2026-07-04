@@ -88,8 +88,8 @@ export async function traiterFacture(file, signal, onJobStarted) {
     throw new ApiError("Impossible de démarrer le traitement", 0);
   }
 
-  // Étape 2 : polling du résultat toutes les 2s (max 3 minutes)
-  const MAX_ATTENTE_MS = 180_000;
+  // Étape 2 : polling du résultat toutes les 2s (max 10 minutes)
+  const MAX_ATTENTE_MS = 600_000;
   const INTERVALLE_MS  = 2_000;
   const debut = Date.now();
 
