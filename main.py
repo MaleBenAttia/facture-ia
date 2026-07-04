@@ -116,10 +116,12 @@ async def preview(file: UploadFile = File(...)):
     contents = await file.read()
     if len(contents) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="Fichier trop volumineux (max 15 Mo)")
-    images_bgr = preparer_image_pour_llm(contents, file.content_type)
-    if not images_bgr:
+    prepared = preparer_image_pour_llm(contents, file.content_type)
+    if isinstance(prepared, str):
+        return Response(content=prepared.encode("utf-8"), media_type="text/plain; charset=utf-8")
+    if not prepared:
         raise HTTPException(status_code=400, detail="Aucune image extraite du fichier")
-    _, buffer = cv2.imencode(".png", images_bgr[0])
+    _, buffer = cv2.imencode(".png", prepared[0])
     return Response(content=buffer.tobytes(), media_type="image/png")
 
 
