@@ -107,10 +107,7 @@ def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: in
                 model = genai.GenerativeModel(modele)
                 response = model.generate_content(
                     contents,
-                    generation_config=genai.types.GenerationConfig(
-                        max_output_tokens=65536,
-                        thinking_config=genai.types.ThinkingConfig(thinking_budget=5000)
-                    )
+                    generation_config=genai.types.GenerationConfig(max_output_tokens=65536)
                 )
                 if modele != MODELES[0]:
                     print(f"  [API]  Modèle utilisé: {modele}")
