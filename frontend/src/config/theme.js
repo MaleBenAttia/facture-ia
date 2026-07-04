@@ -22,7 +22,7 @@ export const THEME = {
 
   },
 
-  formats_acceptes: ["image/jpeg", "image/png", "image/webp", "application/pdf"],
+  formats_acceptes: ["image/jpeg", "image/png", "image/webp", "application/pdf", "text/markdown", "text/x-markdown"],
   taille_max_mo: 15,
 };
 

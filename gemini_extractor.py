@@ -78,11 +78,12 @@ def sauver_compteur(data):
     with open(FICHIER, "w") as f:
         json.dump(data, f)
 
-def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: int = 2):
+def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: int = 2, text_content: str = None):
     """
     Effectue un appel Gemini avec la clé fournie (SDK google.generativeai).
     Essaye chaque modèle dans MODELES jusqu'à en trouver un qui répond.
     pages_data: liste de tuples (image_data: bytes, mime_type: str) — une par page.
+    text_content: si fourni, envoie le texte brut au lieu des images.
     Lève une exception si tous les modèles échouent.
     """
     if not api_key or not api_key.strip():
@@ -91,10 +92,13 @@ def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: in
         )
     genai.configure(api_key=api_key.strip())
 
-    # Convert bytes to PIL Images
-    pil_images = []
-    for data, mime in pages_data:
-        pil_images.append(PIL.Image.open(io.BytesIO(data)))
+    if text_content is not None:
+        contents = [text_content, prompt]
+    else:
+        pil_images = []
+        for data, mime in pages_data:
+            pil_images.append(PIL.Image.open(io.BytesIO(data)))
+        contents = pil_images + [prompt]
 
     dernier_erreur = None
     for modele in MODELES:
@@ -102,7 +106,7 @@ def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: in
             try:
                 model = genai.GenerativeModel(modele)
                 response = model.generate_content(
-                    pil_images + [prompt],
+                    contents,
                     generation_config=genai.types.GenerationConfig(max_output_tokens=65536)
                 )
                 if modele != MODELES[0]:
@@ -159,31 +163,39 @@ def extraire_facture(image_path: str, content_type: str = "image/png", cancel_ev
     with open(image_path, "rb") as f:
         file_bytes = f.read()
     print(f"  [PREPROC] Fichier original: {len(file_bytes)/1024:.1f} Ko, type: {content_type}")
-    images_bgr = preparer_image_pour_llm(file_bytes, content_type)
-    if not images_bgr:
-        raise ValueError("Aucune image extraite du fichier")
-    print(f"  [PREPROC] {len(images_bgr)} page(s) prétraitée(s), encodage PNG...")
-    MAX_LONG_COTE = 2000
-    pages_data = []
-    for i, img_bgr in enumerate(images_bgr):
-        h, w = img_bgr.shape[:2]
-        if len(images_bgr) > 1 and max(w, h) > MAX_LONG_COTE:
-            echelle = MAX_LONG_COTE / max(w, h)
-            nouvelle = (int(w * echelle), int(h * echelle))
-            img_bgr = cv2.resize(img_bgr, nouvelle, interpolation=cv2.INTER_AREA)
-        success, buffer = cv2.imencode(".png", img_bgr)
-        if not success or buffer is None or len(buffer) == 0:
-            raise ValueError(f"Échec de l'encodage PNG pour la page {i+1}")
-        image_data = buffer.tobytes()
-        pages_data.append((image_data, "image/png"))
-        print(f"  [PREPROC]   Page {i+1}: {img_bgr.shape[1]}x{img_bgr.shape[0]} px, {len(image_data)/1024:.1f} Ko")
-    os.makedirs("imagetraiter", exist_ok=True)
-    for i, (data, _) in enumerate(pages_data):
-        with open(f"imagetraiter/page_{i+1}.png", "wb") as f:
-            f.write(data)
-    total_ko = sum(len(d) for d, _ in pages_data) / 1024
-    print(f"  [PREPROC] {len(pages_data)} page(s) sauvegardée(s) dans imagetraiter/page_*.png")
-    print(f"  [PREPROC] Envoi à Gemini: {len(pages_data)} page(s), {total_ko:.1f} Ko total")
+    prepared = preparer_image_pour_llm(file_bytes, content_type)
+
+    # ── Cas markdown : texte brut envoyé directement au LLM ──────────────
+    is_markdown = isinstance(prepared, str)
+    if is_markdown:
+        markdown_text = prepared
+        print(f"  [PREPROC] Fichier markdown : {len(markdown_text)} caractères, envoi texte brut au LLM")
+    else:
+        images_bgr = prepared
+        if not images_bgr:
+            raise ValueError("Aucune image extraite du fichier")
+        print(f"  [PREPROC] {len(images_bgr)} page(s) prétraitée(s), encodage PNG...")
+        MAX_LONG_COTE = 2000
+        pages_data = []
+        for i, img_bgr in enumerate(images_bgr):
+            h, w = img_bgr.shape[:2]
+            if len(images_bgr) > 1 and max(w, h) > MAX_LONG_COTE:
+                echelle = MAX_LONG_COTE / max(w, h)
+                nouvelle = (int(w * echelle), int(h * echelle))
+                img_bgr = cv2.resize(img_bgr, nouvelle, interpolation=cv2.INTER_AREA)
+            success, buffer = cv2.imencode(".png", img_bgr)
+            if not success or buffer is None or len(buffer) == 0:
+                raise ValueError(f"Échec de l'encodage PNG pour la page {i+1}")
+            image_data = buffer.tobytes()
+            pages_data.append((image_data, "image/png"))
+            print(f"  [PREPROC]   Page {i+1}: {img_bgr.shape[1]}x{img_bgr.shape[0]} px, {len(image_data)/1024:.1f} Ko")
+        os.makedirs("imagetraiter", exist_ok=True)
+        for i, (data, _) in enumerate(pages_data):
+            with open(f"imagetraiter/page_{i+1}.png", "wb") as f:
+                f.write(data)
+        total_ko = sum(len(d) for d, _ in pages_data) / 1024
+        print(f"  [PREPROC] {len(pages_data)} page(s) sauvegardée(s) dans imagetraiter/page_*.png")
+        print(f"  [PREPROC] Envoi à Gemini: {len(pages_data)} page(s), {total_ko:.1f} Ko total")
 
     prompt = """
 Tu es un expert-comptable senior et analyste financier specialise dans les factures du Maghreb, d'Europe et du Moyen-Orient.
@@ -366,7 +378,10 @@ FORMAT JSON FINAL :
     for index, api_key in enumerate(cles_actives, start=1):
         try:
             print(f"\n  [API] Tentative avec la clé n°{index}...")
-            response     = _appeler_gemini(api_key, pages_data, prompt)
+            if is_markdown:
+                response = _appeler_gemini(api_key, [], prompt, text_content=markdown_text)
+            else:
+                response = _appeler_gemini(api_key, pages_data, prompt)
             api_utilisee = index
             print(f"  [API] ✅ Clé n°{index} a répondu avec succès.")
             break

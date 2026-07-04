@@ -65,9 +65,13 @@ def extraire_images_embarquees(pdf_bytes: bytes) -> list:
 def extraire_image_de_lentree(file_bytes: bytes, content_type: str):
     """
     Retourne (liste_images, type_contenu).
-    type_contenu = "scan"  -> pipeline complet de filtres
-    type_contenu = "natif" -> aucun filtre (texte vectoriel déjà net)
+    type_contenu = "scan"     -> pipeline complet de filtres
+    type_contenu = "natif"    -> aucun filtre (texte vectoriel déjà net)
+    type_contenu = "markdown" -> fichier texte brut, pas d'image
     """
+    if content_type in ("text/markdown", "text/x-markdown"):
+        return None, "markdown"
+
     if content_type == "application/pdf":
         doc = fitz.open(stream=file_bytes, filetype="pdf")
         texte_total = sum(len(page.get_text().strip()) for page in doc)
@@ -179,10 +183,15 @@ def _preprocessing_minimal(img_bgr, verbose: bool = True):
 def preparer_image_pour_llm(file_bytes: bytes, content_type: str, verbose: bool = True):
     """
     Point d'entrée unique utilisé par gemini_extractor.py.
-    Retourne une liste d'images OpenCV (BGR) prêtes à être encodées et envoyées au LLM.
-    Une image simple → liste d'un élément. Un PDF multi-pages → N éléments.
+    Retourne :
+      - Une liste d'images OpenCV (BGR) prêtes à être encodées et envoyées au LLM.
+        Une image simple → liste d'un élément. Un PDF multi-pages → N éléments.
+      - Un str (texte brut) si le fichier est un markdown → à envoyer directement au LLM.
     """
     images_bgr, type_contenu = extraire_image_de_lentree(file_bytes, content_type)
+
+    if type_contenu == "markdown":
+        return file_bytes.decode("utf-8")
 
     # Pipeline complet sur TOUTES les images (Upscale + CLAHE + Bilateral + Sharpening)
     # Le filtre d'ombre est desactive (abime le logo)

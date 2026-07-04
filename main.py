@@ -28,7 +28,7 @@ app.add_middleware(
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/tiff", "image/bmp", "application/pdf"]
+ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/tiff", "image/bmp", "application/pdf", "text/markdown", "text/x-markdown"]
 
 # Stockage en mémoire des jobs en cours et terminés
 _jobs:        dict = {}

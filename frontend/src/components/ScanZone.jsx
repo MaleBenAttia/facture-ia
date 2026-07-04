@@ -51,6 +51,8 @@ export function ScanZone({ onFileReady, onScanConfirm, etat, progression, fichie
       "image/png": [],
       "image/webp": [],
       "application/pdf": [],
+      "text/markdown": [],
+      "text/x-markdown": [],
     },
     maxSize: THEME.taille_max_mo * 1024 * 1024,
   });
