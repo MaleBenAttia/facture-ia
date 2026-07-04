@@ -34,7 +34,7 @@ export function ScanZone({ onFileReady, onScanConfirm, etat, progression, fichie
     (accepted, rejected) => {
       setErreurLocale(null);
       if (rejected?.length) {
-        setErreurLocale("Format non supporté. Utilisez JPG, PNG, WEBP ou PDF.");
+        setErreurLocale("Format non supporté. Utilisez JPG, PNG, WEBP, PDF ou MD.");
         return;
       }
       if (accepted?.[0]) onFileReady(accepted[0]);
@@ -53,6 +53,15 @@ export function ScanZone({ onFileReady, onScanConfirm, etat, progression, fichie
       "application/pdf": [],
       "text/markdown": [],
       "text/x-markdown": [],
+      "text/plain": [".md"],
+    },
+    validator: (file) => {
+      const ext = file.name.split(".").pop().toLowerCase();
+      const validExts = ["jpg", "jpeg", "png", "webp", "pdf", "md"];
+      if (!validExts.includes(ext)) {
+        return { code: "invalid-extension", message: "Format non supporté" };
+      }
+      return null;
     },
     maxSize: THEME.taille_max_mo * 1024 * 1024,
   });
@@ -135,7 +144,7 @@ export function ScanZone({ onFileReady, onScanConfirm, etat, progression, fichie
                 </span>
               </p>
               <p className="mt-4 text-xs font-mono" style={{ color: "var(--color-text-muted)" }}>
-                JPG · PNG · WEBP · PDF — max {THEME.taille_max_mo} Mo
+                JPG · PNG · WEBP · PDF · MD — max {THEME.taille_max_mo} Mo
               </p>
 
               {erreurLocale && (
