@@ -37,7 +37,7 @@ if not GEMINI_API_KEYS:
 # ─── MODÈLES PRIORITAIRES ──────────────────────────────────────────────────
 # Chaque clé peut avoir accès à des modèles différents selon son quota.
 # On essaie dans cet ordre jusqu'à trouver un modèle qui répond.
-MODELES = ["gemini-2.5-flash", "gemini-2.0-flash-001"]
+MODELES = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash-001"]
 
 # Log de démarrage : confirme le chargement des clés (masquées)
 print(f"[GEMINI] {len(GEMINI_API_KEYS)} clé(s) API chargée(s) :", end=" ")
