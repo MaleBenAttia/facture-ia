@@ -1,3 +1,4 @@
+// ScanZone.jsx — Zone de drop/click pour uploader fichier (image/PDF/markdown) avec barre de progression
 import { useCallback, useState, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import { motion, AnimatePresence } from "framer-motion";
@@ -14,7 +15,7 @@ const MESSAGES = [
   "Finalisation de l'extraction…",
 ];
 
-export function ScanZone({ onFileReady, onScanConfirm, etat, progression, fichierActuel, previewProcessedUrl, dureeTraitement, onAnnuler }) {
+export function ScanZone({ onFileReady, onScanConfirm, etat, progression, fichierActuel, previewProcessedUrl, dureeTraitement, onAnnuler, nbPages }) {
   const [erreurLocale, setErreurLocale] = useState(null);
   const [messageIndex, setMessageIndex] = useState(0);
   const [timerLocal, setTimerLocal] = useState(0);
@@ -255,7 +256,15 @@ export function ScanZone({ onFileReady, onScanConfirm, etat, progression, fichie
               {/* Barre de progression */}
               <div className="w-full">
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-xs font-bold" style={{ color: "var(--color-text-muted)" }}>Traitement IA</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold" style={{ color: "var(--color-text-muted)" }}>Traitement IA</span>
+                    {nbPages > 1 && (
+                      <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full"
+                        style={{ backgroundColor: "rgba(230,57,70,0.12)", color: "#E63946" }}>
+                        {nbPages} pages
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs font-extrabold font-mono" style={{ color: "#E63946" }}>{timerLocal}s</span>
                 </div>
                 <div className="h-2 w-full overflow-hidden rounded-full"

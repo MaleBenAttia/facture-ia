@@ -1,6 +1,7 @@
 import PIL.Image
 import io
-import json, os, threading, time
+import yaml
+import json, os, random, threading, time
 from pathlib import Path
 from datetime import date, datetime
 from dotenv import load_dotenv
@@ -16,8 +17,7 @@ QUOTA_MINUTE = 10
 FICHIER      = "usage_counter.json"
 compteur_lock = threading.Lock()
 
-# ─── CLÉS API AVEC FALLBACK ────────────────────────────────────────────────
-# Charge jusqu'à 6 clés (rétrocompatible : si KEY1 absent, tente GEMINI_API_KEY)
+# ─── CLÉS API (charge 1 a 6 cles depuis .env, retrocompatible GEMINI_API_KEY) ─
 GEMINI_API_KEYS = [
     k for k in [
         os.getenv("GEMINI_API_KEY1"),
@@ -33,10 +33,13 @@ if not GEMINI_API_KEYS:
     raise EnvironmentError("Aucune clé API Gemini trouvée dans le fichier .env ! "
                            "Définissez GEMINI_API_KEY1..6 ou GEMINI_API_KEY.")
 
-# ─── MODÈLES PRIORITAIRES ──────────────────────────────────────────────────
-# Chaque clé peut avoir accès à des modèles différents selon son quota.
-# On essaie dans cet ordre jusqu'à trouver un modèle qui répond.
-MODELES = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash-001"]
+# ─── MODÈLE UNIQUE (Gemini Flash, pas de fallback multi-modèle) ──────────────
+MODELES = ["gemini-2.5-flash"]
+
+# ─── ROTATION DES CLÉS (thread-safe) : pool aleatoire, mise de côté si 2 echecs
+#     Quand le pool est vide, toutes les cles redeviennent disponibles.
+_key_lock = threading.Lock()
+_available_keys = list(enumerate(GEMINI_API_KEYS))  # [(idx, key), ...]
 
 # Log de démarrage : confirme le chargement des clés (masquées)
 print(f"[GEMINI] {len(GEMINI_API_KEYS)} clé(s) API chargée(s) :", end=" ")
@@ -48,6 +51,144 @@ print()
 PRIX_INPUT_PAR_MILLION    = 0.30
 PRIX_OUTPUT_PAR_MILLION   = 2.50
 PRIX_THINKING_PAR_MILLION = 0.30
+
+COLONNES_PRODUIT_STANDARDS = {
+    "numero_ligne", "designation", "quantite", "prix_u_ht",
+    "tva_pct", "total_ht_ligne", "total_ttc", "remise_pct"
+}
+
+_ALIASES_COLONNES = {
+    "numero_ligne":  {"numero_ligne", "n°", "n", "no", "num", "ligne"},
+    "designation":   {"designation", "désignation", "description", "article", "libellé", "libelle", "produit"},
+    "quantite":      {"quantite", "quantité", "qté", "qte", "qty", "qtt"},
+    "prix_u_ht":     {"prix_u_ht", "pu.ht", "pu", "prix unitaire", "prix", "pu ht", "prix_u"},
+    "tva_pct":       {"tva_pct", "tva", "tva %", "tva%"},
+    "total_ht_ligne":{"total_ht_ligne", "total ht", "montant ht", "total_ht", "montant_ht", "montant ht"},
+    "total_ttc":     {"total_ttc", "total ttc", "montant ttc", "total_ttc", "montant_ttc"},
+    "remise_pct":    {"remise_pct", "remise", "r%", "r %", "remise %"},
+}
+
+_MAPPEUR_SUPP_VERS_STANDARD = {
+    "qté": "quantite", "qte": "quantite", "qty": "quantite", "quantité": "quantite",
+    "pu.ht": "prix_u_ht", "pu": "prix_u_ht", "prix": "prix_u_ht",
+    "tva": "tva_pct", "tva %": "tva_pct", "tva%": "tva_pct",
+    "montant ht": "total_ht_ligne", "montant_ht": "total_ht_ligne",
+    "total ht": "total_ht_ligne",
+    "r%": "remise_pct", "r %": "remise_pct", "remise": "remise_pct", "remise %": "remise_pct",
+    "total ttc": "total_ttc", "montant ttc": "total_ttc",
+}
+
+
+def _normaliser_nombre(val):
+    """Convertit '1,804' → 1.804 (format tunisien virgule comme decimal)."""
+    if isinstance(val, (int, float)):
+        return val
+    val = val.strip().replace(" ", "").replace("\u202f", "").replace("\xa0", "")
+    if not val:
+        return -9999
+    # Compter les points et virgules
+    nb_points = val.count(".")
+    nb_virgules = val.count(",")
+    if nb_points > 0 and nb_virgules > 0:
+        # Les deux présents : la dernière occurrence est le séparateur décimal
+        if val.rfind(",") > val.rfind("."):
+            # Virgule est le séparateur décimal
+            val = val.replace(".", "").replace(",", ".")
+        else:
+            # Point est le séparateur décimal
+            val = val.replace(",", "")
+    elif nb_virgules == 1:
+        # Une seule virgule → c'est le séparateur décimal
+        val = val.replace(",", ".")
+    elif nb_virgules > 1:
+        # Plusieurs virgules → ce sont des séparateurs de milliers, enlever
+        val = val.replace(",", "")
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return -9999
+
+
+def _parser_tsv_produits(tsv_text):
+    """Parse le TSV → liste de dicts. Detecte les colonnes par nom, garde l'ordre original."""
+    lignes = [l for l in tsv_text.strip().split("\n") if l.strip()]
+    if not lignes:
+        return [], []
+
+    headers_raw = [h.strip() for h in lignes[0].split("\t")]
+    headers_lower = [h.lower().strip() for h in headers_raw]
+
+    col_index = {}
+    supp_indices = []
+
+    for cle_standard, aliases in _ALIASES_COLONNES.items():
+        for i, h in enumerate(headers_lower):
+            if h in aliases:
+                col_index[cle_standard] = i
+                break
+
+    for i, h in enumerate(headers_lower):
+        if i not in col_index.values():
+            supp_indices.append(i)
+
+    # Construire col_order dans l'ordre d'apparition dans le TSV
+    col_order = []
+    std_to_label = {
+        "numero_ligne": "N°", "designation": "Désignation", "quantite": "Qté",
+        "prix_u_ht": "Prix U HT", "tva_pct": "TVA %", "remise_pct": "Remise %",
+        "total_ht_ligne": "Total HT", "total_ttc": "Total TTC",
+    }
+    # Colonnes standards (sans numero_ligne) dans l'ordre du TSV
+    for i, h in enumerate(headers_raw):
+        h_lower = h.lower().strip()
+        if h_lower in _ALIASES_COLONNES.get("numero_ligne", set()):
+            continue
+        found = False
+        for cle_standard, aliases in _ALIASES_COLONNES.items():
+            if h_lower in aliases:
+                col_order.append({"label": std_to_label.get(cle_standard, cle_standard), "field": cle_standard, "supp_key": None})
+                found = True
+                break
+        if not found:
+            col_order.append({"label": h, "field": None, "supp_key": h})
+
+    produits = []
+    for ligne in lignes[1:]:
+        valeurs = ligne.split("\t")
+        produit = {"champs_supplementaires": {}}
+
+        for cle_standard in COLONNES_PRODUIT_STANDARDS:
+            if cle_standard in col_index:
+                idx = col_index[cle_standard]
+                val = valeurs[idx].strip() if idx < len(valeurs) else ""
+                produit[cle_standard] = val
+
+        for idx in supp_indices:
+            val = valeurs[idx].strip() if idx < len(valeurs) else ""
+            nom_colonne = headers_raw[idx]
+            nom_lower = headers_lower[idx]
+            cle_standard_mappee = _MAPPEUR_SUPP_VERS_STANDARD.get(nom_lower)
+            if cle_standard_mappee and cle_standard_mappee in produit:
+                std_val = _normaliser_nombre(produit[cle_standard_mappee])
+                supp_val = _normaliser_nombre(val)
+                if std_val == -9999 and supp_val != -9999:
+                    produit[cle_standard_mappee] = val
+            elif val:
+                produit["champs_supplementaires"][nom_colonne] = val
+
+        for cle in ["quantite", "prix_u_ht", "tva_pct", "total_ht_ligne", "total_ttc", "remise_pct"]:
+            if cle in produit:
+                produit[cle] = _normaliser_nombre(produit[cle])
+
+        if "numero_ligne" in produit:
+            try:
+                produit["numero_ligne"] = int(_normaliser_nombre(produit["numero_ligne"]))
+            except (ValueError, TypeError):
+                pass
+
+        produits.append(produit)
+    return produits, col_order
+
 
 def lire_compteur():
     aujourd_hui     = str(date.today())
@@ -67,14 +208,8 @@ def sauver_compteur(data):
     with open(FICHIER, "w") as f:
         json.dump(data, f)
 
-def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: int = 3, text_content: str = None):
-    """
-    Effectue un appel Gemini avec le nouveau SDK google-genai.
-    Essaye chaque modèle dans MODELES jusqu'à en trouver un qui répond.
-    pages_data: liste de tuples (image_data: bytes, mime_type: str) — une par page.
-    text_content: si fourni, envoie le texte brut au lieu des images.
-    Lève une exception si tous les modèles échouent.
-    """
+def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: int = 2, text_content: str = None):
+    """Appelle Gemini Flash, reessaie 1x si 429/503 avec backoff exponentiel."""
     from google import genai
     from google.genai import types
 
@@ -92,77 +227,74 @@ def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: in
         contents = pil_images + [prompt]
 
     config = types.GenerateContentConfig(
-        max_output_tokens=65536
+        max_output_tokens=65536,
+        thinking_config=types.ThinkingConfig(thinking_budget=5555)
     )
 
-    import re as _re
+    modele = MODELES[0]
+    for tentative in range(1, max_retries + 1):
+        try:
+            t0 = time.perf_counter()
+            response = client.models.generate_content(
+                model=modele,
+                contents=contents,
+                config=config
+            )
+            duree = time.perf_counter() - t0
 
-    dernier_erreur = None
-    for modele in MODELES:
-        for tentative in range(1, max_retries + 1):
-            try:
-                response = client.models.generate_content(
-                    model=modele,
-                    contents=contents,
-                    config=config
-                )
-                if modele != MODELES[0]:
-                    print(f"  [API]  Modele utilise: {modele}")
-                return response
-            except Exception as e:
-                dernier_erreur = e
-                msg = str(e)
-                est_503 = "503" in msg or "UNAVAILABLE" in msg
-                est_429 = "429" in msg or "RESOURCE_EXHAUSTED" in msg
-                est_image = "image" in msg.lower() and "not support" in msg.lower()
+            # ── Métriques de performance ──────────────────────────────
+            usage = getattr(response, "usage_metadata", None)
+            tokens_out   = getattr(usage, "candidates_token_count", 0) or 0
+            tokens_in    = getattr(usage, "prompt_token_count",     0) or 0
+            tokens_think = getattr(usage, "thoughts_token_count",   0) or 0
+            tokens_total = getattr(usage, "total_token_count",      0) or 0
+            tok_s = tokens_out / duree if duree > 0 else 0
 
-                if est_503 and tentative < max_retries:
+            print(
+                f"  [PERF] ✅ {modele} | "
+                f"⏱  {duree:.2f}s | "
+                f"🚀 {tok_s:.1f} tok/s | "
+                f"in={tokens_in} out={tokens_out}"
+                + (f" think={tokens_think}" if tokens_think else "")
+                + f" total={tokens_total}"
+            )
+            # ─────────────────────────────────────────────────────────
+
+            # Attache la durée à la réponse pour la réutiliser dans le résumé
+            response._perf_duree  = duree
+            response._perf_tok_s  = tok_s
+
+            return response
+        except Exception as e:
+            dernier_erreur = e
+            msg = str(e)
+            est_503 = "503" in msg or "UNAVAILABLE" in msg
+            est_429 = "429" in msg or "RESOURCE_EXHAUSTED" in msg
+
+            if tentative < max_retries:
+                if est_503:
                     attente = min(2 ** tentative, 10)
-                    print(f"  [API]  {modele} 503 (tentative {tentative}/{max_retries}) -- dans {attente}s...")
+                    print(f"  [API]  {modele} 503 (tentative {tentative}/{max_retries}) -- attente {attente}s...")
                     time.sleep(attente)
                     continue
-
-                if est_429:
+                elif est_429:
+                    import re as _re
                     match = _re.search(r"retryDelay['\"]?\s*:\s*['\"]?(\d+\.?\d*)s", msg)
                     wait = float(match.group(1)) if match else 30
                     wait = min(wait, 60)
-                    if tentative < max_retries:
-                        print(f"  [API]  {modele} 429 (tentative {tentative}/{max_retries}) -- attente {wait:.0f}s...")
-                        time.sleep(wait)
-                        continue
-                    break
-
-                if est_image or tentative == max_retries:
-                    break
+                    print(f"  [API]  {modele} 429 (tentative {tentative}/{max_retries}) -- attente {wait:.0f}s...")
+                    time.sleep(wait)
+                    continue
+                else:
+                    print(f"  [API]  {modele} erreur (tentative {tentative}/{max_retries}) : {type(e).__name__}")
+                    continue
 
     raise dernier_erreur or RuntimeError("Impossible d'atteindre Gemini.")
 
 
 def extraire_facture(image_path: str, content_type: str = "image/png", cancel_event=None) -> dict:
-    # ── Rechargement dynamique du .env (sécurité si le module est importé tôt)
-    load_dotenv(dotenv_path=_ENV_PATH, override=True)
-
-    # Relit les clés à chaque appel pour être sûr d'avoir les valeurs actuelles
-    cles_actives = [
-        k for k in [
-            os.getenv("GEMINI_API_KEY1"),
-            os.getenv("GEMINI_API_KEY2"),
-            os.getenv("GEMINI_API_KEY3"),
-            os.getenv("GEMINI_API_KEY4"),
-            os.getenv("GEMINI_API_KEY5"),
-            os.getenv("GEMINI_API_KEY6"),
-            os.getenv("GEMINI_API_KEY"),
-        ] if k and k.strip()
-    ]
-    if not cles_actives:
-        raise EnvironmentError(
-            f"Aucune clé API trouvée dans {_ENV_PATH}. "
-            "Définissez GEMINI_API_KEY1..6 ou GEMINI_API_KEY."
-        )
-    print(f"  [API] {len(cles_actives)} clé(s) disponibles : "
-          + "  ".join(f"Clé{i}=...{k[-6:]}" for i, k in enumerate(cles_actives, 1)))
-
-    # ── Vérification annulation AVANT lecture du fichier et appel Gemini ─────
+    """Pipeline complet : preprocess → rotation cle → Gemini → parse YAML+TSV."""
+    global _available_keys, _key_lock
     if cancel_event and cancel_event.is_set():
         raise InterruptedError("Job annulé par l'utilisateur.")
 
@@ -182,7 +314,7 @@ def extraire_facture(image_path: str, content_type: str = "image/png", cancel_ev
         images_bgr = prepared
         if not images_bgr:
             raise ValueError("Aucune image extraite du fichier")
-        print(f"  [PREPROC] {len(images_bgr)} page(s) prétraitée(s), encodage PNG...")
+        print(f"  [PREPROC] {len(images_bgr)} page(s) prétraitée(s), encodage JPG...")
         MAX_LONG_COTE = 2000
         pages_data = []
         for i, img_bgr in enumerate(images_bgr):
@@ -205,205 +337,159 @@ def extraire_facture(image_path: str, content_type: str = "image/png", cancel_ev
         print(f"  [PREPROC] {len(pages_data)} page(s) sauvegardée(s) dans imagetraiter/page_*.png")
         print(f"  [PREPROC] Envoi à Gemini: {len(pages_data)} page(s), {total_ko:.1f} Ko total")
 
+    # Prompt envoye tel quel a Gemini (instructions extraction + format attendu)
     prompt = """
-Tu es un expert-comptable senior et analyste financier specialise dans les factures du Maghreb, d'Europe et du Moyen-Orient.
-Cette facture peut contenir plusieurs pages fournies ci-dessous. Utilise TOUTES les pages pour extraire les donnees.
-
-
-Ton travail est d'extraire les donnees avec une precision maximale ET d'identifier tout element anormal ou suspect.
+Expert-comptable specialise factures Maghreb/Europe/MO. Extrais TOUTES les donnees avec precision.
 
 ════════════════════════════════════════
-PARTIE 1 — EXTRACTION DES DONNEES
+PARTIE 1 — EXTRACTION
 ════════════════════════════════════════
 
-REGLES ABSOLUES :
-- Reponds UNIQUEMENT avec du JSON brut valide. Zero markdown, zero backticks, zero commentaire.
-- Champ absent ou illisible → null exactement.
-- Valeur numerique absente → -9999. Ne jamais inventer.
-- Valeur explicitement 0 dans la facture → 0.0.
-- TOUT le texte dans le JSON doit etre en FRANCAIS. Les alertes, messages, remarques, et tout champ texte doit etre redige en francais.
-- Les produits dans le tableau "produits" doivent etre dans l'ORDRE CROISSANT de "numero_ligne" (ligne 1, ligne 2, ligne 3...). Ne jamais melanger l'ordre.
+REGLES :
+- Retourne bloc <YAML> (metadonnees) + bloc <TSV> (produits). Zero markdown, backticks, commentaires.
+- Champ absent/vide → laisse vide. Valeur numerique absente → -9999. 0 dans la facture → 0.0.
+- Si valeur YAML contient ":" → guillemets doubles ex: "Siège Social : 76, Rue...".
+- Texte en FRANCAIS. Produits par ordre croissant de numero_ligne.
+- tva_pct : taux EXACT de la colonne TVA. Jamais 20% par defaut.
 
-DETECTION GEOGRAPHIQUE ET DEVISE (critique) :
-Analyse tous les indices : langue, ville, code postal, mentions legales, matricule fiscal, symbole monetaire.
-- Tunisie → TND (3 decimales, 1 DT = 1000 millimes. Ex: 78.411 = soixante-dix-huit dinars)
-- Algerie → DZD (2 decimales. Cherche "DA", "DZD", wilaya, NIF algerien)
-- Maroc → MAD (2 decimales. Cherche "MAD", "DH", "ICE", ville marocaine)
-- France / zone Euro → EUR (2 decimales. Cherche "SIRET", "TVA FR", "€")
-- USA / international → USD si indices clairs
-- Si aucun indice : deduis depuis le format des montants (dernier separateur = decimale)
-IMPORTANT : si devise TND, le point dans les montants est TOUJOURS decimal, jamais separateur de milliers.
+DEVISE : Analyse tous les indices (ville, MF, symbole, langue).
+  TND=3 dec (1 DT=1000 millimes). DZD=2 (DA). MAD=2 (DH). EUR=2 (€). USD=2 ($).
+  SANITY CHECK PRIX : une baguette ← 0.2 DT (200 millimes), un cafe ← 1 DT, un stylo ← 1-5 DT,
+  un pneu ← 50-300 DT, une piece auto ← 5-500 DT. Si le prix est 100x trop haut/bas →
+  separateur decimal mal interprete, corrige automatiquement. Ex: 0.200 DT = 200 millimes.
 
-VERIFICATION PRIX RAISONNABLE SELON ARTICLE ET PAYS (critique) :
-- Analyse le designation de chaque ligne et verifie que le prix_u_ht est coherent avec l'article ET le pays.
-  EXEMPLE : "Stylo" en Tunisie → 0.5 a 5 TND max. "Pneu" en Tunisie → 50 a 300 TND.
-- Si le prix extrait est absurde pour l'article detecte, c'est que le separateur decimal est mal interprete.
-  EXEMPLE : 7.411 TND sur une bouteille → 7.411 TND (correct, 7 dinars 411 millimes).
-  7411 TND sur une bouteille → ABSURDE, le point est decimal : c'est 7.411 TND, pas 7411.
-- TND (Tunisie) : 3 decimales. 1 DT = 1000 millimes. Ex: 7.411 = 7 dinars 411 millimes.
-- DZD (Algerie) : 2 decimales. Ex: 150.50 DA.
-- MAD (Maroc) : 2 decimales. Ex: 85.00 DH.
-- EUR : 2 decimales. Ex: 12.99 €.
-- Si le prix semble 100x ou 1000x trop eleve pour l'article, corrige automatiquement la position de la virgule.
+CHAMPS : type_facture, etat(PAYE/IMPAYE/null), mode_reglement(Especes/Cheque/Virement), remarques(toujours entre guillemets), matricule_fiscal, societe_tel/email.
+- Contacts multiples (tel, fax, email) : le principal dans le champ standard, les autres dans champs_supplementaires avec cles explicites ("gsm1", "fax", "email2").
+- champs_supplementaires facture+client : TOUS les champs visibles non-couverts, noms EXACTS, ordre original. Les champs standards sont remplis EN PLUS. AUCUN champ perdu.
 
-CHAMPS A EXTRAIRE :
-- type_facture : "Facture", "Proforma", "Avoir", "Bon de livraison", "Devis", etc.
-- etat : "PAYE" ou "IMPAYE" ou null. Cherche tampons, cachets, mentions explicites.
-- mode_reglement : "Especes", "Cheque", "Virement", "Traite", "Carte", etc.
-- remarques : notes de bas de page, conditions de paiement ("paiement fin du mois", "sous 30 jours"),
-  escomptes, penalites de retard, mentions legales. Concatene tout en une seule chaine. null si absent.
-- matricule_fiscal : cherche "M.F", "MF", "NIF", "Matricule", "ICE", "SIRET", "SIREN".
-- societe_tel / societe_email : Extraire le contact principal. S'il y a PLUSIEURS numéros ou emails, place les autres EXCLUSIVEMENT dans `champs_supplementaires` avec des clés explicites (ex: "gsm1", "gsm2", "fixe", "email2").
-- champs_supplementaires : tout champ visible non couvert par le schema (dont les numéros/emails supplémentaires).
-
-FACTURE ET CLIENT — AUSSI DYNAMIQUES VIA champs_supplementaires (obligatoire) :
-- `champs_supplementaires` dans `facture` DOIT contenir TOUS les champs du haut de facture avec leurs noms EXACTS (numero facture, date, nom societe, adresse, MF, RC, telephone, fax, email, total ht, tva, timbre, net a payer, mode reglement, etc.).
-- `champs_supplementaires` dans `client` DOIT contenir TOUS les champs client avec leurs noms EXACTS (code client, nom, prenom, telephone, adresse, matricule fiscal, service achats, contact, etc.).
-- Les champs standards sont remplis EN PLUS, par deduction depuis les champs originaux.
-- AUCUN champ visible ne doit etre perdu.
-- L'ordre des champs dans `champs_supplementaires` doit respecter l'ordre original d'apparition sur la facture (de haut en bas, de gauche a droite).
-
-PRODUITS — 100% DYNAMIQUE VIA champs_supplementaires (obligatoire) :
-- Les colonnes du tableau de facture changent selon le fournisseur.
-- `champs_supplementaires` DOIT contenir TOUTES les colonnes visibles avec leurs noms EXACTS.
-- Peu importe les colonnes : "Famille", "Categorie", "Article", "Code", "Couleur", "Taille", "Unite", "Poids" → tout va dans `champs_supplementaires` avec le nom exact.
-- Les champs standards (designation, quantite...) sont remplis par deduction.
-- Mais AUCUNE colonne ne doit etre perdue. Si la facture a 5 colonnes, `champs_supplementaires` a 5 entrees.
-- L'ordre des colonnes dans `champs_supplementaires` doit respecter l'ordre original du tableau dans la facture (de gauche a droite).
-
-EXEMPLE :
-  Facture avec colonnes : "Famille", "Article", "Qté", "PU", "Total"
-  {
-    "designation": "Stylo",
-    "quantite": 10,
-    "prix_u_ht": 2.5,
-    "total_ht_ligne": 25.0,
-    "champs_supplementaires": {
-      "Famille": "Bureau",
-      "Article": "Stylo",
-      "Qté": 10,
-      "PU": 2.5,
-      "Total": 25.0
-    }
-  }
+PRODUITS en TSV. La 1ere ligne = les EN-TETES EXACTS de la facture, EXACTEMENT dans le MEME ORDRE visible (gauche a droite). INTERDICTION de reordonner ou de grouper les colonnes "standards" ensemble.
+- Les colonnes sont reconnues par leur NOM : designation, quantite, prix_u_ht, tva_pct, total_ht_ligne, total_ttc, remise_pct.
+- numero_ligne : seulement si la facture a une colonne "N°", "Ligne" ou "#". Sinon, NE PAS l'ajouter.
+- Separe par des tabulations. AUCUNE colonne perdue.
 
 ════════════════════════════════════════
-PARTIE 2 — VERIFICATION MATHEMATIQUE
+PARTIE 2 — VERIFICATION
 ════════════════════════════════════════
 
-REGLES ABSOLUES - NE PAS DEVIER :
-- Tu dois retourner UN SEUL element dans le tableau "alertes". Pas deux, pas trois. UN SEUL.
-- INTERDIT : commentaires sur les noms, matricules, conformite, TVA globale, labels ambigus, pays, devise, ou quoi que ce soit d'autre que les chiffres.
-- AUTORISE UNIQUEMENT : verifier si total_ht + montant_tva + timbre_fiscal = net_a_payer (tolerance 1%).
+Un SEUL element dans alertes. INTERDIT tout commentaire autre que le calcul.
+VERIFIER : total_ht + montant_tva + timbre_fiscal ≈ net_a_payer (tolerance 1%).
+- Si = ou champs manquants → success : "Calculs verifies. Aucune erreur detectee."
+- Si ecart → erreur : "Erreur de calcul : Total attendu : X. Affiche : Y. Ecart : Z."
+- Total HT ligne = quantite × prix_u_ht × (1 - remise_pct/100) si remise_pct > 0. Signaler toute ligne non-conforme.
+- Colonnes TSV : chaque ligne de donnees doit avoir le meme nombre de colonnes que l'en-tete.
+- Si total_ht_ligne fourni, verifier que la somme ≈ total_ht facture (tolerance 1%).
+- Ne jamais signaler d'erreur si l'ecart est inferieur a 5% : les arrondis, centimes et taxes differentes sont normaux.
 
-CAS 1 - Tout est correct (ou champs manquants) :
-  alertes: [{"type": "success", "message": "Calculs verifies. Aucune erreur detectee."}]
+════════════════════════════════════════
+FORMAT FINAL
+════════════════════════════════════════
 
-CAS 2 - Erreur de calcul uniquement :
-  alertes: [{"type": "erreur", "message": "Erreur de calcul : Total attendu : X. Affiche : Y. Ecart : Z."}]
-
-FORMAT JSON FINAL :
-{
-  "facture": {
-    "type_facture": null,
-    "numero_facture": null,
-    "date": "DD/MM/YYYY",
-    "societe_nom": null,
-    "societe_adresse": null,
-    "societe_tel": null,
-    "societe_email": null,
-    "societe_matricule_fiscal": null,
-    "societe_rc": null,
-    "societe_ai": null,
-    "societe_compte_bancaire": null,
-    "total_ht": -9999,
-    "montant_tva": -9999,
-    "tva_pct": -9999,
-    "timbre_fiscal": -9999,
-    "net_a_payer": -9999,
-    "montant_en_lettres": null,
-    "mode_reglement": null,
-    "etat": null,
-    "remarques": null,
-    "champs_supplementaires": {
-      "N° Facture": "FAC-2026-0001",
-      "Date": "01/07/2026",
-      "Client": "NOM DU CLIENT",
-      "MF": "1234567/A/M/000",
-      "Adresse": "Adresse complete",
-      "Tel": "71 000 000"
-    }
-  },
-  "client": {
-    "code_client": null,
-    "nom": null,
-    "prenom": null,
-    "telephone": null,
-    "adresse": null,
-    "matricule_fiscal": null,
-    "champs_supplementaires": {
-      "Code client": "CL-001",
-      "Service Achats": "M. Nom Prenom",
-      "Contact": "contact@email.tn"
-    }
-  },
-  "produits": [
-    {
-      "numero_ligne": 1,
-      "designation": null,
-      "quantite": -9999,
-      "prix_u_ht": -9999,
-      "tva_pct": -9999,
-      "remise_pct": -9999,
-      "total_ht_ligne": -9999,
-      "total_ttc": -9999,
-      "champs_supplementaires": {
-        "Article": "valeur de la colonne Article",
-        "Qté": 0
-      }
-    }
-  ],
-  "analyse": {
-    "pays_detecte": null,
-    "ville_detecte": null,
-    "devise_detecte": null,
-    "alertes": [
-      {
-        "type": "erreur | avertissement | info",
-        "message": "Description claire et actionnable pour le comptable"
-      }
-    ]
-  }
-}
+<YAML>
+facture:
+  type_facture:
+  numero_facture:
+  date: DD/MM/YYYY
+  societe_nom:
+  societe_adresse:
+  societe_tel:
+  societe_email:
+  societe_matricule_fiscal:
+  societe_rc:
+  societe_ai:
+  societe_compte_bancaire:
+  total_ht: -9999
+  montant_tva: -9999
+  tva_pct: -9999
+  timbre_fiscal: -9999
+  net_a_payer: -9999
+  montant_en_lettres:
+  mode_reglement:
+  etat:
+  remarques: ""
+  champs_supplementaires:
+    "N Facture": FAC-2026-0001
+    Date: 01/07/2026
+    Client: NOM DU CLIENT
+    MF: "1234567/A/M/000"
+    Adresse: Adresse complete
+    Tel: "71 000 000"
+client:
+  code_client:
+  nom:
+  prenom:
+  telephone:
+  adresse:
+  matricule_fiscal:
+  champs_supplementaires:
+    Code client: CL-001
+    Service Achats: M. Nom Prenom
+    Contact: contact@email.tn
+analyse:
+  pays_detecte:
+  ville_detecte:
+  devise_detecte:
+  alertes:
+    - type: info
+      message: Description claire et actionnable pour le comptable
+</YAML>
+<TSV>
+Reference\tdesignation\tquantite\tprix_u_ht\ttva_pct\ttotal_ht_ligne\ttotal_ttc\tremise_pct\tFamille
+REF-001\tStylo\t10\t2.5\t19\t25.0\t29.75\t0\tPapeterie
+</TSV>
 """
 
 
-    # ── Appel avec fallback entre les clés API ─────────────────────────────
+    # ── Rotation : pioche aleatoire, 2 tentatives, mise de cote si echec ────
     response      = None
     api_utilisee  = None
     erreurs_api   = []
 
-    for index, api_key in enumerate(cles_actives, start=1):
+    for _ in range(len(GEMINI_API_KEYS)):
+        with _key_lock:
+            if not _available_keys:
+                _available_keys = list(enumerate(GEMINI_API_KEYS))
+                print(f"  [API] 🔄 Cycle terminé, toutes les clés sont de nouveau disponibles")
+            idx = random.randrange(len(_available_keys))
+            key_index, api_key = _available_keys.pop(idx)
+        key_num = key_index + 1
+
+        # 1re tentative avec cette cle
         try:
-            print(f"\n  [API] Tentative avec la clé n°{index}...")
+            print(f"\n  [API] Tentative avec la clé n°{key_num}...")
             if is_markdown:
                 response = _appeler_gemini(api_key, [], prompt, text_content=markdown_text)
             else:
                 response = _appeler_gemini(api_key, pages_data, prompt)
-            api_utilisee = index
-            print(f"  [API] ✅ Clé n°{index} a répondu avec succès.")
+            api_utilisee = key_num
+            print(f"  [API] ✅ Clé n°{key_num} a répondu avec succès.")
             break
         except Exception as e:
-            msg = f"Clé n°{index} → {type(e).__name__}: {e}"
+            msg = f"Clé n°{key_num} (1er essai) → {type(e).__name__}: {e}"
             erreurs_api.append(msg)
             print(f"  [API] ❌ {msg}")
-            if index < len(cles_actives):
-                print(f"  [API] Basculement sur la clé n°{index + 1}...")
+
+            # 2e tentative avec la même clé
+            try:
+                print(f"  [API] ↻ 2e tentative avec la clé n°{key_num}...")
+                if is_markdown:
+                    response = _appeler_gemini(api_key, [], prompt, text_content=markdown_text)
+                else:
+                    response = _appeler_gemini(api_key, pages_data, prompt)
+                api_utilisee = key_num
+                print(f"  [API] ✅ Clé n°{key_num} a répondu au 2e essai.")
+                break
+            except Exception as e2:
+                msg2 = f"Clé n°{key_num} (2e essai) → {type(e2).__name__}: {e2}"
+                erreurs_api.append(msg2)
+                print(f"  [API] ❌ {msg2}")
+                print(f"  [API] ⛔ Clé n°{key_num} mise de côté pour ce cycle")
+                # La clé reste retirée de _available (mise de côté)
+                continue
 
     if response is None:
         detail = " | ".join(erreurs_api)
         raise RuntimeError(
-            f"Toutes les clés API ont échoué ({len(cles_actives)} clé(s) testée(s)). "
+            f"Toutes les clés API ont échoué ({len(GEMINI_API_KEYS)} clé(s) testée(s)). "
             f"Détails : {detail}"
         )
 
@@ -433,59 +519,96 @@ FORMAT JSON FINAL :
     print(text)
     print("=====================")
 
-    if text.startswith("```"):
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-        text = text.strip()
-
     if not text:
         raise ValueError("Gemini a retourne une reponse vide")
 
-    # Extrait l'objet JSON entre { et } (ignore texte avant/apres)
-    debut = text.find("{")
-    fin = text.rfind("}")
-    if debut != -1 and fin != -1 and fin > debut:
-        text = text[debut:fin+1]
-    text = text.strip()
+    yaml_text = ""
+    tsv_text = ""
 
     import re
+    bloc_yaml = re.search(r"<YAML>\s*(.*?)\s*</YAML>", text, re.DOTALL)
+    bloc_tsv = re.search(r"<TSV>\s*(.*?)\s*</TSV>", text, re.DOTALL)
 
-    def reparer_json(t):
-        t = re.sub(r",\s*([}\]])", r"\1", t)
-        t = re.sub(r"'", '"', t)
-        t = re.sub(r"\bNone\b", "null", t)
-        t = re.sub(r"\bTrue\b", "true", t)
-        t = re.sub(r"\bFalse\b", "false", t)
-        t = re.sub(r"([{,])\s*(\w+)\s*:", r'\1"\2":', t)
-        t = re.sub(r'"\s+', '"', t)
-        return t
-
-    for _ in range(2):
-        try:
-            resultat = json.loads(text)
-            break
-        except json.JSONDecodeError:
-            text = reparer_json(text)
+    if bloc_yaml and bloc_tsv:
+        yaml_text = bloc_yaml.group(1).strip()
+        tsv_text = bloc_tsv.group(1).strip()
     else:
-        print(f"  [JSON] ÉCHEC — contenu brut (premiers 500c) : {text[:500]}")
-        raise ValueError(f"Réponse JSON invalide après réparation.")
+        fallback = text
+        if fallback.startswith("```"):
+            fallback = fallback.split("```")[1]
+            if fallback.startswith("yaml"):
+                fallback = fallback[4:]
+            fallback = fallback.strip()
+        yaml_text = fallback
+
+    if not yaml_text:
+        raise ValueError("Bloc YAML vide dans la reponse Gemini")
+
+    try:
+        resultat = yaml.safe_load(yaml_text)
+    except yaml.YAMLError as e:
+        # Tentative de correction : mettre entre guillemets les valeurs contenant des ":"
+        import re as _re
+        lignes = yaml_text.split('\n')
+        corrige = []
+        for ligne in lignes:
+            if ':' in ligne:
+                partie_val = ligne.split(':', 1)[1].lstrip()
+                if ':' in partie_val and not partie_val.startswith(('"', "'", '-')) and not partie_val.startswith('['):
+                    # La valeur contient ":" sans guillemets → on quote toute la valeur
+                    debut = ligne[:len(ligne)-len(partie_val)]
+                    corrige.append(debut + '"' + partie_val + '"')
+                else:
+                    corrige.append(ligne)
+            else:
+                corrige.append(ligne)
+        corrige = '\n'.join(corrige)
+        try:
+            resultat = yaml.safe_load(corrige)
+            print("  [YAML] ✅ Corrigé automatiquement (valeurs quotees)")
+        except yaml.YAMLError:
+            print(f"  [YAML] ECHEC — contenu brut (premiers 500c) : {yaml_text[:500]}")
+            raise ValueError(f"Reponse YAML invalide: {e}")
+
+    if not isinstance(resultat, dict):
+        raise ValueError(f"Reponse YAML invalide: attendu dict, obtenu {type(resultat).__name__}")
+
+    if tsv_text:
+        produits, col_order = _parser_tsv_produits(tsv_text)
+        resultat["produits"] = produits
+        resultat["col_order"] = col_order
+    elif "produits" not in resultat:
+        resultat["produits"] = []
 
     # ── Tokens et quotas (affiché en dernier dans le debug) ──────────────
     restant_jour   = QUOTA_JOUR   - compteur["requetes_jour"]
     restant_minute = QUOTA_MINUTE - compteur["requetes_minute"]
 
-    print("\n=============================")
+    # Récupère durée et tok/s attachés par _appeler_gemini
+    _duree = getattr(response, "_perf_duree", None)
+    _tok_s = getattr(response, "_perf_tok_s", None)
+
+    print("=============================")
     print(f"   TOKENS CETTE REQUETE  (API clé n°{api_utilisee})")
     if len(erreurs_api) > 0:
-        print(f"   ⚠️  {len(erreurs_api)} clé(s) ont échoué avant succès")
+        print(f"   ⚠️  {len(erreurs_api)} erreur(s) avant succès")
         for e in erreurs_api:
             print(f"      • {e}")
+    print("----- CLÉS DISPONIBLES -----")
+    with _key_lock:
+        snapshot = _available_keys.copy()
+    for i, k in enumerate(GEMINI_API_KEYS, 1):
+        dispo = any(idx == i - 1 for idx, _ in snapshot)
+        etat = "✅" if dispo else "⛔"
+        nb = " (moi)" if i == api_utilisee else ""
+        print(f"  Clé {i} {etat}{nb}")
     print("=============================")
     print(f"  Input    : {tokens_input:,} tokens")
-    print(f"  Thinking : {tokens_thinking:,} tokens")
+    print(f"  Thinking : {tokens_thinking:,} tokens  (budget max: 5555)")
     print(f"  Output   : {tokens_output:,} tokens")
     print(f"  Total    : {tokens_total:,} tokens")
+    if _duree is not None:
+        print(f"  Temps    : {_duree:.2f}s  |  🚀 {_tok_s:.1f} tok/s")
     print(f"  Cout     : ${cout_requete:.6f}  ({cout_requete * 3.3:.6f} TND)")
     print("----- QUOTA MINUTE -----")
     print(f"  Utilises : {compteur['requetes_minute']} / {QUOTA_MINUTE}")

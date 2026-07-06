@@ -1,3 +1,4 @@
+# pdf_generator.py — Genere un PDF formaté (tableau + totaux) à partir du dict facture.
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.units import cm
@@ -6,7 +7,7 @@ from reportlab.platypus import (
     HRFlowable, KeepTogether
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 from html import escape
 import os
 
@@ -21,11 +22,7 @@ def fmt(val, decimals=3):
     try:
         return f"{float(val):.{decimals}f}"
     except (TypeError, ValueError):
-        # Valeur non numerique (ex: quantite = "Tout-En-Un") -> on l'affiche telle quelle
         return str(val)
-
-
-def fmt_tva(val):
     if val is None or val == NULL_VAL:
         return "-"
     try:
@@ -175,56 +172,79 @@ def json_vers_pdf(facture: dict, filename: str = None) -> str:
         elements.append(Spacer(1, 0.5 * cm))
 
     # --- Tableau produits ---
-    # Collecter les cles uniques de champs_supplementaires dans les produits
-    pro_champs_sup_keys = []
-    for p in produits:
-        sup = p.get("champs_supplementaires") or {}
-        for k in sup:
-            if k not in pro_champs_sup_keys:
-                pro_champs_sup_keys.append(k)
-
-    # Si champs_supplementaires existe, on les utilise UNIQUEMENT (pas de doublon)
-    if pro_champs_sup_keys:
-        prod_headers = list(pro_champs_sup_keys)
-        col_widths = [max(2.5, 18 / len(prod_headers)) * cm] * len(prod_headers)
-    else:
-        has_remise = any(p.get("remise_pct") not in (None, NULL_VAL, 0) for p in produits)
-        has_tva = any(p.get("tva_pct") not in (None, NULL_VAL) for p in produits)
-        has_ttc = any(p.get("total_ttc") not in (None, NULL_VAL) for p in produits)
-        has_ht_ligne = any(p.get("total_ht_ligne") not in (None, NULL_VAL) for p in produits)
-        prod_headers = ["D\u00e9signation", "Qt\u00e9", "Prix U HT"]
-        col_widths = [6.5 * cm, 1.3 * cm, 2.7 * cm]
-        if has_tva:
-            prod_headers.append("TVA %"); col_widths.append(1.8 * cm)
-        if has_remise:
-            prod_headers.append("Remise %"); col_widths.append(1.8 * cm)
-        if has_ht_ligne:
-            prod_headers.append("Total HT"); col_widths.append(2.4 * cm)
-        if has_ttc:
-            prod_headers.append("Total TTC"); col_widths.append(2.4 * cm)
-
-    # Ligne d'en-tete en Paragraph (pour un wrap propre meme sur l'en-tete)
-    prod_data = [[Paragraph(safe(h), cell_header_style) for h in prod_headers]]
-
-    for p in produits:
-        pro_champs_sup = p.get("champs_supplementaires") or {}
-        row = []
-        for h in prod_headers:
-            val = pro_champs_sup.get(h)
-            if val is None and not pro_champs_sup_keys:
-                # Fallback colonnes standard
-                mapping = {"D\u00e9signation": "designation", "Qt\u00e9": "quantite", "Prix U HT": "prix_u_ht",
-                           "TVA %": "tva_pct", "Remise %": "remise_pct", "Total HT": "total_ht_ligne", "Total TTC": "total_ttc"}
-                std_key = mapping.get(h)
-                if std_key:
-                    val = p.get(std_key)
-            if val in (None, NULL_VAL):
-                row.append(Paragraph("-", cell_style_center))
-            elif isinstance(val, (dict, list)):
-                row.append(Paragraph(safe(formater_valeur_remarque(val)), cell_style))
+    col_order = facture.get("col_order", [])
+    if col_order:
+        std_widths = {"D\u00e9signation": 6.5 * cm, "Qt\u00e9": 1.3 * cm, "Prix U HT": 2.7 * cm,
+                      "TVA %": 1.8 * cm, "Remise %": 1.8 * cm, "Total HT": 2.4 * cm, "Total TTC": 2.4 * cm}
+        prod_headers = []
+        col_widths = []
+        for c in col_order:
+            prod_headers.append(c["label"])
+            if c["label"] in std_widths:
+                col_widths.append(std_widths[c["label"]])
             else:
-                row.append(Paragraph(safe(str(val)), cell_style_center))
-        prod_data.append(row)
+                col_widths.append(max(2.5, 18 / len(col_order)) * cm)
+
+        prod_data = [[Paragraph(safe(h), cell_header_style) for h in prod_headers]]
+
+        for p in produits:
+            pro_champs_sup = p.get("champs_supplementaires") or {}
+            row = []
+            for c in col_order:
+                if c.get("field"):
+                    val = p.get(c["field"])
+                else:
+                    val = pro_champs_sup.get(c["supp_key"])
+                if val in (None, NULL_VAL):
+                    row.append(Paragraph("-", cell_style_center))
+                elif isinstance(val, (dict, list)):
+                    row.append(Paragraph(safe(formater_valeur_remarque(val)), cell_style))
+                else:
+                    row.append(Paragraph(safe(str(val)), cell_style_center))
+            prod_data.append(row)
+    else:
+        std_cols_pdf = [
+            ("designation", "D\u00e9signation"), ("quantite", "Qt\u00e9"),
+            ("prix_u_ht", "Prix U HT"), ("tva_pct", "TVA %"),
+            ("remise_pct", "Remise %"), ("total_ht_ligne", "Total HT"),
+            ("total_ttc", "Total TTC"),
+        ]
+        prod_headers = []
+        col_widths = []
+        for key, label in std_cols_pdf:
+            if any(p.get(key) not in (None, NULL_VAL) for p in produits):
+                prod_headers.append(label)
+                if label == "D\u00e9signation": col_widths.append(6.5 * cm)
+                elif label in ("Qt\u00e9",): col_widths.append(1.3 * cm)
+                elif label in ("Prix U HT",): col_widths.append(2.7 * cm)
+                elif label in ("TVA %", "Remise %"): col_widths.append(1.8 * cm)
+                elif label in ("Total HT", "Total TTC"): col_widths.append(2.4 * cm)
+
+        pro_champs_sup_keys = []
+        for p in produits:
+            sup = p.get("champs_supplementaires") or {}
+            for k in sup:
+                if k not in pro_champs_sup_keys: pro_champs_sup_keys.append(k)
+
+        prod_headers.extend(pro_champs_sup_keys)
+        if pro_champs_sup_keys:
+            largeur_supp = max(2.5, 18 / len(prod_headers)) * cm
+            col_widths.extend([largeur_supp] * len(pro_champs_sup_keys))
+
+        prod_data = [[Paragraph(safe(h), cell_header_style) for h in prod_headers]]
+
+        for p in produits:
+            pro_champs_sup = p.get("champs_supplementaires") or {}
+            row = []
+            for h in prod_headers:
+                val = None
+                for key, label in std_cols_pdf:
+                    if label == h: val = p.get(key); break
+                if val is None: val = pro_champs_sup.get(h)
+                if val in (None, NULL_VAL): row.append(Paragraph("-", cell_style_center))
+                elif isinstance(val, (dict, list)): row.append(Paragraph(safe(formater_valeur_remarque(val)), cell_style))
+                else: row.append(Paragraph(safe(str(val)), cell_style_center))
+            prod_data.append(row)
 
     t_prod = Table(prod_data, colWidths=col_widths, repeatRows=1)
     t_prod.setStyle(TableStyle([

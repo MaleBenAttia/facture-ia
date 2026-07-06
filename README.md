@@ -8,7 +8,7 @@ Système complet et moderne pour scanner une facture (image ou PDF), en extraire
 - **Extraction par IA (Google Gemini)** : Analyse instantanée des montants, TVA, numéros de factures, et détail ligne par ligne des pièces (références, quantités, prix unitaires).
 - **Exports direct** : Téléchargement immédiat du tableau structuré au format Excel (`.xlsx`) ou PDF (`.pdf`).
 - **Historique de Session** : Garde une trace visuelle de toutes les factures traitées durant votre session.
-- **Prétraitement automatique des images** : Correction d'ombre, upscaling adaptatif, rehaussement de contraste (CLAHE), netteté optimisée avant envoi au LLM.
+- **Prétraitement automatique des images** : Upscaling adaptatif, rehaussement de contraste (CLAHE), netteté optimisée avant envoi au LLM.
 - **Aperçu instantané** : Dès l'upload, l'image prétraitée est affichée dans l'interface (PDF converti en image visible).
 - **Débogage visuel** : L'image exacte envoyée à Gemini est sauvegardée dans `imagetraiter/`.
 - **Parsing JSON robuste** : Extraction du bloc `{...}`, 2 passes de réparation automatique (virgules, guillemets, clés), fallback avec logs.
@@ -37,7 +37,7 @@ facture-ia/
 ├── requirements.txt        # 📦 Dépendances Python (FastAPI, google-genai, etc.)
 ├── main.py                 # ⚙️ SERVEUR BACKEND (FastAPI - Routes et configuration)
 ├── gemini_extractor.py     # Logique métier : Appel à l'API Gemini 2.5 pour l'extraction
-├── image_preprocessor.py   # 🖼️ Pipeline de prétraitement : ombre, upscale, CLAHE, sharpening
+├── image_preprocessor.py   # 🖼️ Pipeline de prétraitement : upscale, CLAHE, sharpening
 ├── imagetraiter/           # 📁 Dossier de débogage : dernière image envoyée à Gemini
 ├── excel_generator.py      # Génération du fichier Excel via openpyxl
 └── pdf_generator.py        # Génération du fichier PDF via reportlab
@@ -86,7 +86,7 @@ python -m venv venv
 pip install -r requirements.txt
 
 # 4. Configurer les variables d'environnement
-# Copiez .env.example vers .env et ajoutez votre clé GEMINI_API_KEY
+# Creez un fichier .env avec votre clé GEMINI_API_KEY
 ```
 
 **Lancer le serveur API :**
@@ -120,7 +120,7 @@ Avant d'envoyer une image à Gemini, elle passe par un pipeline adaptatif :
 |---|---|---|
 | **Détection PDF** | `content_type == "application/pdf"` | Distingue PDF scanné (image) vs natif (texte vectoriel) |
 | **Extraction page** | PDF scanné | Rendu de la 1ʳᵉ page en image via PyMuPDF (300 DPI) |
-| **Suppression d'ombre** | Écart-type du fond > 18 | Algorithme de dilation + médian + normalisation |
+
 | **Upscaling** | < 0,5 MP → x4 ; < 2 MP → x2 | `cv2.INTER_CUBIC` + unsharp mask pour éviter les pixels |
 | **CLAHE** | Toujours (sauf PDF natif) | Rehaussement de contraste local pour mieux lire les chiffres |
 | **Filtre bilatéral** | Toujours | Réduction du bruit en préservant les contours |
@@ -210,3 +210,4 @@ Lors du test de l'application via un réseau local (`192.168.x.x`) ou un VPN (co
 - **Refonte de la page d'accueil :** Suppression de la section "Hero" (images de démonstration) pour afficher directement le cœur de l'application (le scanner) en plein écran, rendant l'outil plus immédiat et productif.
 - **Background animé :** Mise en place d'un fond dynamique subtil (icônes flottantes) avec correction de l'ordre d'empilement (z-index) et ajustement des couleurs pour être parfaitement lisible sur le thème clair.
 - **Nettoyage des assets :** Suppression de toutes les images statiques devenues obsolètes pour alléger le projet.
+uvicorn main:app --reload --port 8000 --host 0.0.0.0

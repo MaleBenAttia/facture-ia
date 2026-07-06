@@ -1,7 +1,7 @@
+// InvoiceHistory.jsx — Liste des factures traitees dans la session, clic pour revoir le resultat
 import { History, FileText, FileImage, ChevronRight, Inbox } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent } from "./ui/Card";
 import { formatMontant } from "../lib/utils";
-import { THEME } from "../config/theme";
 
 export function InvoiceHistory({ historique, onSelectionner, selectionneeId }) {
   return (

@@ -1,3 +1,4 @@
+# excel_generator.py — Genere un .xlsx (tableau + totaux) à partir du dict facture.
 import openpyxl
 from openpyxl.styles import Font, PatternFill
 import os
@@ -21,13 +22,6 @@ def write_headers(ws, headers):
         cell = ws.cell(1, col, h)
         cell.font = HEADER_FONT
         cell.fill = HEADER_FILL
-
-def ajouter_ligne(ws, headers, data: dict):
-    row = ws.max_row + 1
-    if ws.max_row == 1 and ws.cell(1, 1).value is None:
-        row = 2
-    for col, h in enumerate(headers, 1):
-        ws.cell(row, col, data.get(h, None))
 
 def json_vers_excel(facture: dict):
     f = facture.get("facture", {})
@@ -120,36 +114,36 @@ def json_vers_excel(facture: dict):
             ws_cli.cell(2, col, c.get(h))
 
     # --- Feuille Produits ---
-    # Collecter toutes les cles uniques de champs_supplementaires dans les produits
-    pro_champs_sup_keys = []
-    for p in produits:
-        sup = p.get("champs_supplementaires") or {}
-        for k in sup:
-            if k not in pro_champs_sup_keys:
-                pro_champs_sup_keys.append(k)
-
-    # Si champs_supplementaires existe, on les utilise UNIQUEMENT (pas de doublon)
-    if pro_champs_sup_keys:
-        pro_headers = pro_champs_sup_keys
+    col_order = facture.get("col_order", [])
+    if col_order:
+        pro_headers = [c["label"] for c in col_order]
     else:
-        # Fallback : colonnes standard si pas de champs_supplementaires
-        pro_headers = ["designation", "quantite", "prix_u_ht"]
-        has_remise = any(p.get("remise_pct") not in (None, "", -9999) for p in produits)
-        has_total_ht = any(p.get("total_ht_ligne") not in (None, "", -9999) for p in produits)
-        has_total_ttc = any(p.get("total_ttc") not in (None, "", -9999) for p in produits)
-        has_tva = any(p.get("tva_pct") not in (None, "", -9999) for p in produits)
-        if has_tva:      pro_headers.append("tva_pct")
-        if has_remise:   pro_headers.append("remise_pct")
-        if has_total_ht: pro_headers.append("total_ht_ligne")
-        if has_total_ttc: pro_headers.append("total_ttc")
+        std_cols = [
+            ("designation", "Désignation"), ("quantite", "Qté"),
+            ("prix_u_ht", "Prix U HT"), ("tva_pct", "TVA %"),
+            ("remise_pct", "Remise %"), ("total_ht_ligne", "Total HT"),
+            ("total_ttc", "Total TTC"),
+        ]
+        pro_headers = []
+        for key, label in std_cols:
+            if any(p.get(key) not in (None, "", -9999) for p in produits):
+                pro_headers.append(label)
+        pro_champs_sup_keys = []
+        for p in produits:
+            sup = p.get("champs_supplementaires") or {}
+            for k in sup:
+                if k not in pro_champs_sup_keys:
+                    pro_champs_sup_keys.append(k)
+        pro_headers.extend(pro_champs_sup_keys)
 
     write_headers(ws_pro, pro_headers)
     for row_idx, p in enumerate(produits, 2):
         pro_champs_sup = p.get("champs_supplementaires") or {}
-        for col, h in enumerate(pro_headers, 1):
-            val = pro_champs_sup.get(h)
-            if val is None and not pro_champs_sup_keys:
-                val = p.get(h)
+        for col, col_def in enumerate(col_order, 1):
+            if col_def.get("field"):
+                val = p.get(col_def["field"])
+            else:
+                val = pro_champs_sup.get(col_def["supp_key"])
             if isinstance(val, (dict, list)):
                 val = str(val)
             ws_pro.cell(row_idx, col, val if val not in (-9999,) else None)

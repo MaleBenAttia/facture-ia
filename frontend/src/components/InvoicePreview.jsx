@@ -1,3 +1,4 @@
+// InvoicePreview.jsx — Tableau des produits (col_order), devise, alertes + boutons telechargement
 import {
   Building2,
   User,
@@ -91,22 +92,34 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
   // Utiliser la devise détectée par l'IA si disponible, sinon repli sur celle du thème
   const devise = resultat.data?.analyse?.devise_detecte || THEME.devise;
 
-  const colonnes = {
+  // Utiliser col_order pour les colonnes du tableau produits
+  const col_order = resultat.data?.col_order || [];
+  const fallbackColonnes = !col_order.length && {
     tva: produitsAffiches.some((p) => !estVide(p.tva_pct)),
     remise: produitsAffiches.some((p) => !estVide(p.remise_pct) && p.remise_pct !== 0),
     totalHt: produitsAffiches.some((p) => !estVide(p.total_ht_ligne)),
     totalTtc: produitsAffiches.some((p) => !estVide(p.total_ttc)),
   };
-
-  // Collecter toutes les cles uniques de champs_supplementaires produits
   const proSupKeys = [];
-  produitsAffiches.forEach(p => {
-    if (p.champs_supplementaires) {
-      Object.keys(p.champs_supplementaires).forEach(k => {
-        if (!proSupKeys.includes(k)) proSupKeys.push(k);
-      });
-    }
-  });
+  if (!col_order.length) {
+    const SUPP_DOUBLONS = new Set([
+      "qté", "qte", "qty", "quantité", "quantite",
+      "pu.ht", "pu", "prix", "prix unitaire",
+      "tva", "tva %", "tva%", "tva_pct",
+      "r%", "r %", "remise", "remise %", "remise_pct",
+      "montant ht", "montant_ht", "total ht", "total_ht", "total_ht_ligne",
+      "total ttc", "montant ttc", "total_ttc",
+    ]);
+    produitsAffiches.forEach(p => {
+      if (p.champs_supplementaires) {
+        Object.keys(p.champs_supplementaires).forEach(k => {
+          if (!proSupKeys.includes(k) && !SUPP_DOUBLONS.has(k.toLowerCase())) {
+            proSupKeys.push(k);
+          }
+        });
+      }
+    });
+  }
 
   // Filtrer les champs supplementaires client non vides
   const clientSupEntries = c.champs_supplementaires
@@ -210,10 +223,10 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
           <table className="w-full min-w-[480px] text-sm">
             <thead>
               <tr className="border-b border-white/10 text-left text-[11px] uppercase tracking-wide text-text-muted">
-                {proSupKeys.length > 0 ? (
-                  proSupKeys.map(key => (
-                    <th key={key} className="py-2 px-3 font-medium text-center text-[11px]">
-                      {key.replace(/_/g, ' ')}
+                {col_order.length > 0 ? (
+                  col_order.map((col, i) => (
+                    <th key={i} className="py-2 px-3 font-medium text-center text-[11px]">
+                      {col.label}
                     </th>
                   ))
                 ) : (
@@ -221,10 +234,15 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
                     <th className="py-2 pr-3 font-medium">Désignation</th>
                     <th className="py-2 px-3 font-medium text-center">Qté</th>
                     <th className="py-2 px-3 font-medium text-right">Prix U HT</th>
-                    {colonnes.tva && <th className="py-2 px-3 font-medium text-center">TVA</th>}
-                    {colonnes.remise && <th className="py-2 px-3 font-medium text-center">Remise</th>}
-                    {colonnes.totalHt && <th className="py-2 px-3 font-medium text-right">Total HT</th>}
-                    {colonnes.totalTtc && <th className="py-2 pl-3 font-medium text-right">Total TTC</th>}
+                    {fallbackColonnes?.tva && <th className="py-2 px-3 font-medium text-center">TVA</th>}
+                    {fallbackColonnes?.remise && <th className="py-2 px-3 font-medium text-center">Remise</th>}
+                    {fallbackColonnes?.totalHt && <th className="py-2 px-3 font-medium text-right">Total HT</th>}
+                    {fallbackColonnes?.totalTtc && <th className="py-2 pl-3 font-medium text-right">Total TTC</th>}
+                    {proSupKeys.map(key => (
+                      <th key={key} className="py-2 px-3 font-medium text-center text-[11px]">
+                        {key.replace(/_/g, ' ')}
+                      </th>
+                    ))}
                   </>
                 )}
               </tr>
@@ -232,11 +250,16 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
             <tbody className="divide-y divide-white/5">
               {produitsAffiches.map((p, i) => (
                 <tr key={i} className="text-ink">
-                  {proSupKeys.length > 0 ? (
-                    proSupKeys.map(key => {
-                      const val = p.champs_supplementaires?.[key];
+                  {col_order.length > 0 ? (
+                    col_order.map((col, j) => {
+                      let val;
+                      if (col.field) {
+                        val = p[col.field];
+                      } else {
+                        val = p.champs_supplementaires?.[col.supp_key];
+                      }
                       return (
-                        <td key={key} className="py-2.5 px-3 text-center text-text-muted text-xs">
+                        <td key={j} className="py-2.5 px-3 text-center text-text-muted text-xs">
                           {estVide(val) ? "—" : String(val)}
                         </td>
                       );
@@ -248,33 +271,41 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
                         {estVide(p.quantite) ? "—" : p.quantite}
                       </td>
                       <td className="py-2.5 px-3 text-right">{formatMontant(p.prix_u_ht, devise)}</td>
-                      {colonnes.tva && (
+                      {fallbackColonnes?.tva && (
                         <td className="py-2.5 px-3 text-center text-text-muted">
                           {formatPourcentage(p.tva_pct)}
                         </td>
                       )}
-                      {colonnes.remise && (
+                      {fallbackColonnes?.remise && (
                         <td className="py-2.5 px-3 text-center text-text-muted">
                           {formatPourcentage(p.remise_pct)}
                         </td>
                       )}
-                      {colonnes.totalHt && (
+                      {fallbackColonnes?.totalHt && (
                         <td className="py-2.5 px-3 text-right">
                           {formatMontant(p.total_ht_ligne, devise)}
                         </td>
                       )}
-                      {colonnes.totalTtc && (
+                      {fallbackColonnes?.totalTtc && (
                         <td className="py-2.5 pl-3 text-right font-medium">
                           {formatMontant(p.total_ttc, devise)}
                         </td>
                       )}
+                      {proSupKeys.map(key => {
+                        const val = p.champs_supplementaires?.[key];
+                        return (
+                          <td key={key} className="py-2.5 px-3 text-center text-text-muted text-xs">
+                            {estVide(val) ? "—" : String(val)}
+                          </td>
+                        );
+                      })}
                     </>
                   )}
                 </tr>
               ))}
               {produitsTronques && (
                 <tr className="bg-amber-50/20">
-                  <td colSpan={proSupKeys.length > 0 ? proSupKeys.length : 8} className="py-3 text-center text-amber-600 text-xs font-medium">
+                  <td colSpan={col_order.length || (fallbackColonnes ? Object.values(fallbackColonnes).filter(Boolean).length + 3 + proSupKeys.length : 8)} className="py-3 text-center text-amber-600 text-xs font-medium">
                     ... et {produits.length - 50} autres produits (voir Excel/PDF complets)
                   </td>
                 </tr>

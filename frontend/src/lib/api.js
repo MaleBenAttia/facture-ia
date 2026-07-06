@@ -65,12 +65,13 @@ export async function previsualiserFacture(file, signal) {
  * @param {File} file  - Le fichier à analyser
  * @param {AbortSignal} signal - Signal pour annuler le polling côté client
  */
-export async function traiterFacture(file, signal, onJobStarted) {
+export async function traiterFacture(file, signal, onJobStarted, onProgress) {
   const formData = new FormData();
   formData.append("file", file);
 
   // Étape 1 : upload + démarrage du job (réponse immédiate < 1s)
   let jobId;
+  let nbPages = 1;
   try {
     const res = await fetch(`${API_BASE}/process`, {
       method: "POST",
@@ -80,7 +81,8 @@ export async function traiterFacture(file, signal, onJobStarted) {
     await gererReponse(res);
     const body = await res.json();
     jobId = body.job_id;
-    onJobStarted?.(jobId);
+    nbPages = body.nb_pages || 1;
+    onJobStarted?.(jobId, nbPages);
     if (!jobId) throw new ApiError("Réponse inattendue du serveur (pas de job_id)", 500);
   } catch (err) {
     if (err.name === "AbortError") throw new ApiError("Traitement annulé.", 0);
@@ -123,10 +125,15 @@ export async function traiterFacture(file, signal, onJobStarted) {
         const { data } = responseData;
         return { data, excel: job.excel, pdf: job.pdf };
       }
-      if (job.status === "error") {
+      if (job.status === "processing") {
+        if (onProgress && typeof job.progress === "number") {
+          onProgress(job.progress);
+        }
+        // continue polling
+      } else if (job.status === "error") {
         throw new ApiError(job.detail || "Erreur lors du traitement", 500);
       }
-      // status === "processing" ou "not_found" → on réessaie
+      // status === "not_found" → on réessaie
     } catch (err) {
       if (err.name === "AbortError" || (err instanceof ApiError && err.status === 0)) throw err;
       if (err instanceof ApiError) throw err;

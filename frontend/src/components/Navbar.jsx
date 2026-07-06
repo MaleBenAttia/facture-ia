@@ -1,4 +1,4 @@
-import React from "react";
+// Navbar.jsx — Barre de navigation avec logo, nom app et nom magasin
 import { ScanLine } from "lucide-react";
 import { THEME } from "../config/theme";
 

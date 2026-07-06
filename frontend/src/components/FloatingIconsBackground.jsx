@@ -1,4 +1,5 @@
-import React, { useMemo } from "react";
+// FloatingIconsBackground.jsx — Fond anime avec icones flottantes (decoration pure)
+import { useMemo } from "react";
 import { Wrench, Settings, Gauge, PenTool, Hexagon, CircleDashed, Car, Compass, Activity, Crosshair } from "lucide-react";
 
 const ICONS = [Wrench, Settings, Gauge, PenTool, Hexagon, CircleDashed, Car, Compass, Activity, Crosshair];

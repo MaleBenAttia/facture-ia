@@ -1,3 +1,4 @@
+// App.jsx — Racine : upload → barre de progression → resultat table + telechargements + historique
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Navbar } from "./components/Navbar";
@@ -47,6 +48,7 @@ function AppContenu() {
   const [historique,          setHistorique]          = useState([]);
   const [selectionneeId,      setSelectionneeId]      = useState(null);
   const [dureeTraitement,     setDureeTraitement]     = useState(null);
+  const [nbPages,             setNbPages]             = useState(1);
 
   // Nettoie l'URL du preview quand elle change ou au démontage
   useEffect(() => {
@@ -80,6 +82,7 @@ function AppContenu() {
     setEtat("traitement");
     setProgression(3);
     setDureeTraitement(null);
+    setNbPages(1);
     const debutTimer = Date.now();
 
     // Crée un AbortController pour pouvoir annuler le fetch/polling
@@ -89,25 +92,39 @@ function AppContenu() {
     abortCtrlRef.current = ctrl;
     jobIdRef.current     = null; // sera rempli par traiterFacture
 
-    // Progression simulée : ease-out sur ~6s jusqu'à 94%, puis attend la réponse
-    const DUREE_MS  = 6000;
-    const STEP_MS   = 120;
-    let elapsed     = 0;
-    const interval  = setInterval(() => {
-      elapsed += STEP_MS;
-      const ratio = Math.min(elapsed / DUREE_MS, 1);
-      const eased = 1 - Math.pow(1 - ratio, 2.5);
-      setProgression(Math.round(3 + eased * 91));
-    }, STEP_MS);
+    let interval = null;
+
+    const demarrerProgression = (pages) => {
+      // ~12.5s par page (4 pages → 50s, 1 page → 25s)
+      const dureeEstimeeMs = Math.min(Math.max(pages * 12_500, 20_000), 120_000);
+      const STEP_MS = 120;
+      if (interval) clearInterval(interval);
+      let elapsed = 0;
+      interval = setInterval(() => {
+        elapsed += STEP_MS;
+        const ratio = Math.min(elapsed / dureeEstimeeMs, 1);
+        setProgression(Math.round(3 + ratio * 96));
+      }, STEP_MS);
+    };
+
+    demarrerProgression(1);
 
     try {
-      const reponse = await traiterFacture(fichierActuel, ctrl.signal, (jobId) => {
-        if (runIdRef.current === runId && !ctrl.signal.aborted) {
-          jobIdRef.current = jobId;
-        } else {
-          annulerJob(jobId);
+      const reponse = await traiterFacture(
+        fichierActuel,
+        ctrl.signal,
+        (jobId, pages) => {
+          if (runIdRef.current === runId && !ctrl.signal.aborted) {
+            jobIdRef.current = jobId;
+            if (pages && pages > 1) {
+              setNbPages(pages);
+              demarrerProgression(pages);
+            }
+          } else {
+            annulerJob(jobId);
+          }
         }
-      });
+      );
       clearInterval(interval);
       if (ctrl.signal.aborted || runIdRef.current !== runId) return;
       setProgression(100);
@@ -121,7 +138,7 @@ function AppContenu() {
       setSelectionneeId(entree.id);
       toast({ variant: "success", title: "Facture analysée", description: "Données extraites avec succès." });
     } catch (err) {
-      clearInterval(interval);
+      if (interval) clearInterval(interval);
       // Si annulé par l'utilisateur → retour silencieux à l'état preview
       const annule = err instanceof ApiError && err.status === 0 && err.message.includes("annulé");
       if (annule) {
@@ -248,6 +265,7 @@ function AppContenu() {
                   fichierActuel={fichierActuel}
                   previewProcessedUrl={previewProcessedUrl}
                   dureeTraitement={dureeTraitement}
+                  nbPages={nbPages}
                   onFileReady={handleFichierSelect}
                   onScanConfirm={lancerTraitement}
                   onAnnuler={annulerTraitement}

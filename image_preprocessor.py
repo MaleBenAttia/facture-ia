@@ -1,9 +1,8 @@
 """
-Préprocessing des factures avant envoi au LLM.
-Gère 3 entrées : image simple, PDF scanné, PDF natif (avec ou sans image insérée).
+image_preprocessor.py — Pipeline adaptatif : upscale, CLAHE, sharpening,
+puis envoi au LLM. Gere images, PDF scannes et PDF natifs (avec ou sans logo).
 """
 
-import os
 import fitz  # PyMuPDF
 import cv2
 import numpy as np
@@ -13,19 +12,11 @@ MIN_DIMENSION = 1000  # pixels minimum sur le plus court cote
 
 # ---------- Extraction depuis PDF (3 cas) ou image ----------
 def pdf_vers_images(pdf_bytes: bytes, dpi: int = 300) -> list:
+    """Rend chaque page PDF en image bitmap 300 DPI (page entiere, pas d'extraction d'images embarquees)."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     images = []
     for page in doc:
-        page_w = page.rect.width
-        page_h = page.rect.height
-        rendered_w = int(page_w * dpi / 72)
-        rendered_h = int(page_h * dpi / 72)
-        effective_dpi = dpi
-        shortest = min(rendered_w, rendered_h)
-        if shortest < MIN_DIMENSION and shortest > 0:
-            effective_dpi = int(dpi * MIN_DIMENSION / shortest)
-            print(f"  [PREPROC] Page {rendered_w}x{rendered_h}px trop petite → re-render a {effective_dpi} DPI")
-        zoom_f = effective_dpi / 72
+        zoom_f = dpi / 72
         mat = fitz.Matrix(zoom_f, zoom_f)
         pix = page.get_pixmap(matrix=mat)
         img_array = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
@@ -42,33 +33,8 @@ def pdf_vers_images(pdf_bytes: bytes, dpi: int = 300) -> list:
     return images
 
 
-def extraire_images_embarquees(pdf_bytes: bytes) -> list:
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    resultats = []
-    for page in doc:
-        images = page.get_images(full=True)
-        if images:
-            xref = images[0][0]
-            base_image = doc.extract_image(xref)
-            img_bytes = base_image["image"]
-            nparr = np.frombuffer(img_bytes, np.uint8)
-            img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            if img_bgr is None:
-                continue
-            resultats.append(img_bgr)
-    doc.close()
-    if resultats:
-        return resultats
-    return pdf_vers_images(pdf_bytes, dpi=300)
-
-
 def extraire_image_de_lentree(file_bytes: bytes, content_type: str):
-    """
-    Retourne (liste_images, type_contenu).
-    type_contenu = "scan"     -> pipeline complet de filtres
-    type_contenu = "natif"    -> aucun filtre (texte vectoriel déjà net)
-    type_contenu = "markdown" -> fichier texte brut, pas d'image
-    """
+    """Detecte le type (image / PDF / markdown), appelle pdf_vers_images ou decode directement."""
     if content_type in ("text/markdown", "text/x-markdown"):
         return None, "markdown"
 
@@ -92,26 +58,7 @@ def extraire_image_de_lentree(file_bytes: bytes, content_type: str):
         return [img_bgr], "scan"
 
 
-# ---------- Détection ----------
-def detecter_ombre(img_bgr, seuil_ecart_type: float = 18) -> bool:
-    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    bg = cv2.medianBlur(gray, 31)
-    return np.std(bg) > seuil_ecart_type
-
-
 # ---------- Corrections ----------
-def supprimer_ombre(img_bgr):
-    h, w = img_bgr.shape[:2]
-    noyau = max(15, min(41, int(min(h, w) * 0.02) | 1))
-    rgb_planes = cv2.split(img_bgr)
-    result_planes = []
-    for plane in rgb_planes:
-        dilated = cv2.dilate(plane, np.ones((noyau // 3 | 1, noyau // 3 | 1), np.uint8))
-        bg = cv2.medianBlur(dilated, noyau)
-        diff = 255 - cv2.absdiff(plane, bg)
-        norm = cv2.normalize(diff, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8UC1)
-        result_planes.append(norm)
-    return cv2.merge(result_planes)
 
 
 def upscale_smooth(img_bgr, facteur: float = 2):
@@ -138,6 +85,7 @@ def ameliorer_texte(img_bgr):
 
 # ---------- Pipeline complet adaptatif (résolution réelle) ----------
 def pipeline_adaptatif_complet(img_bgr, verbose: bool = True):
+    """Upscale si petite image, puis CLAHE + bilateral + sharpening. S'adapte a la resolution."""
     h, w = img_bgr.shape[:2]
     taille_px = h * w
     if verbose:
@@ -167,27 +115,9 @@ def pipeline_adaptatif_complet(img_bgr, verbose: bool = True):
     return img
 
 
-# ---------- Pipeline minimal (préserve le logo) ----------
-def _preprocessing_minimal(img_bgr, verbose: bool = True):
-    h, w = img_bgr.shape[:2]
-    taille_px = h * w
-    if taille_px < 1.5e6:
-        facteur = min(2.0, (2e6 / max(taille_px, 1)) ** 0.5)
-        img_bgr = cv2.resize(img_bgr, None, fx=facteur, fy=facteur, interpolation=cv2.INTER_CUBIC)
-        if verbose: print(f"[preprocessing] → Upscale x{facteur:.1f} ({w}x{h} -> {int(w*facteur)}x{int(h*facteur)})")
-    img_bgr = cv2.addWeighted(img_bgr, 1.4, cv2.GaussianBlur(img_bgr, (0, 0), 0.5), -0.4, 0)
-    return img_bgr
-
-
 # ---------- Point d'entrée public ----------
 def preparer_image_pour_llm(file_bytes: bytes, content_type: str, verbose: bool = True):
-    """
-    Point d'entrée unique utilisé par gemini_extractor.py.
-    Retourne :
-      - Une liste d'images OpenCV (BGR) prêtes à être encodées et envoyées au LLM.
-        Une image simple → liste d'un élément. Un PDF multi-pages → N éléments.
-      - Un str (texte brut) si le fichier est un markdown → à envoyer directement au LLM.
-    """
+    """Point d'entree unique : detecte image/PDF/markdown, applique le pipeline, retourne images ou texte."""
     images_bgr, type_contenu = extraire_image_de_lentree(file_bytes, content_type)
 
     if type_contenu == "markdown":
