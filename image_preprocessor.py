@@ -25,7 +25,9 @@ def pdf_vers_images(pdf_bytes: bytes, dpi: int = 300) -> list:
         elif pix.n == 3:
             img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
         elif pix.n == 1:
-            img_bgr = cv2.cvtColor(img_array, cv2.COLOR_GRAY2BGR)
+            img_array = img_array.reshape(pix.height, pix.width)
+            images.append(img_array)
+            continue
         else:
             img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
         images.append(img_bgr)
@@ -86,6 +88,10 @@ def ameliorer_texte(img_bgr):
 # ---------- Pipeline complet adaptatif (résolution réelle) ----------
 def pipeline_adaptatif_complet(img_bgr, verbose: bool = True):
     """Upscale si petite image, puis CLAHE + bilateral + sharpening. S'adapte a la resolution."""
+    # Si deja en gris (1 canal), on convertit en BGR pour le pipeline puis on repasse en gris
+    est_gris = len(img_bgr.shape) == 2
+    if est_gris:
+        img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_GRAY2BGR)
     h, w = img_bgr.shape[:2]
     taille_px = h * w
     if verbose:
@@ -112,8 +118,8 @@ def pipeline_adaptatif_complet(img_bgr, verbose: bool = True):
         img = ameliorer_texte(img)
         if verbose: print(f"[preprocessing] -> Grande image: reduite a {nouvelle_taille} + sharpening")
 
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     return img
-
 
 # ---------- Point d'entrée public ----------
 def preparer_image_pour_llm(file_bytes: bytes, content_type: str, verbose: bool = True):
