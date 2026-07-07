@@ -210,4 +210,52 @@ Lors du test de l'application via un réseau local (`192.168.x.x`) ou un VPN (co
 - **Refonte de la page d'accueil :** Suppression de la section "Hero" (images de démonstration) pour afficher directement le cœur de l'application (le scanner) en plein écran, rendant l'outil plus immédiat et productif.
 - **Background animé :** Mise en place d'un fond dynamique subtil (icônes flottantes) avec correction de l'ordre d'empilement (z-index) et ajustement des couleurs pour être parfaitement lisible sur le thème clair.
 - **Nettoyage des assets :** Suppression de toutes les images statiques devenues obsolètes pour alléger le projet.
-uvicorn main:app --reload --port 8000 --host 0.0.0.0
+
+---
+
+## ⚙️ Installation sur un nouveau PC
+
+```batch
+:: 1. Cloner le depot
+cd C:\Users\user\Desktop
+git clone https://github.com/MaleBenAttia/facture-ia.git
+cd facture-ia
+
+:: 2. Backend Python
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+
+:: 3. Creer le fichier .env (cles API Gemini)
+notepad .env
+```
+
+### .env
+
+```
+GEMINI_API_KEY1=ta_cle_api
+```
+
+### Lancer
+
+```batch
+cd C:\Users\user\Desktop\facture-ia
+.\venv\Scripts\activate
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Ouvrir http://localhost:8000
+
+### Mettre à jour après modification du code
+
+```batch
+cd C:\Users\user\Desktop\facture-ia
+git pull origin main
+.\venv\Scripts\activate
+pip install -r requirements.txt
+cd frontend
+npm install
+npm run build
+cd ..
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
