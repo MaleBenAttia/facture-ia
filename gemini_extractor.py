@@ -323,18 +323,18 @@ def extraire_facture(image_path: str, content_type: str = "image/png", cancel_ev
                 echelle = MAX_LONG_COTE / max(w, h)
                 nouvelle = (int(w * echelle), int(h * echelle))
                 img_bgr = cv2.resize(img_bgr, nouvelle, interpolation=cv2.INTER_AREA)
-            success, buffer = cv2.imencode(".png", img_bgr)
+            success, buffer = cv2.imencode(".jpg", img_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
             if not success or buffer is None or len(buffer) == 0:
-                raise ValueError(f"Échec de l'encodage PNG pour la page {i+1}")
+                raise ValueError(f"Échec de l'encodage JPG pour la page {i+1}")
             image_data = buffer.tobytes()
-            pages_data.append((image_data, "image/png"))
+            pages_data.append((image_data, "image/jpeg"))
             print(f"  [PREPROC]   Page {i+1}: {img_bgr.shape[1]}x{img_bgr.shape[0]} px, {len(image_data)/1024:.1f} Ko")
         os.makedirs("imagetraiter", exist_ok=True)
         for i, (data, _) in enumerate(pages_data):
-            with open(f"imagetraiter/page_{i+1}.png", "wb") as f:
+            with open(f"imagetraiter/page_{i+1}.jpg", "wb") as f:
                 f.write(data)
         total_ko = sum(len(d) for d, _ in pages_data) / 1024
-        print(f"  [PREPROC] {len(pages_data)} page(s) sauvegardée(s) dans imagetraiter/page_*.png")
+        print(f"  [PREPROC] {len(pages_data)} page(s) sauvegardée(s) dans imagetraiter/page_*.jpg")
         print(f"  [PREPROC] Envoi à Gemini: {len(pages_data)} page(s), {total_ko:.1f} Ko total")
 
     # Prompt envoye tel quel a Gemini (instructions extraction + format attendu)

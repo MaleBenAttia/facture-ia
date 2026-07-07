@@ -152,8 +152,8 @@ async def preview(file: UploadFile = File(...)):
         return Response(content=prepared.encode("utf-8"), media_type="text/plain; charset=utf-8")
     if not prepared:
         raise HTTPException(status_code=400, detail="Aucune image extraite du fichier")
-    _, buffer = cv2.imencode(".png", prepared[0])
-    return Response(content=buffer.tobytes(), media_type="image/png")
+    _, buffer = cv2.imencode(".jpg", prepared[0], [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+    return Response(content=buffer.tobytes(), media_type="image/jpeg")
 
 
 @app.post("/process")
