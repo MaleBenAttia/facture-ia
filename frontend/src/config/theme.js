@@ -6,8 +6,6 @@ export const THEME = {
   // --- Identité ---
   nom_app: "Scanner-Pro",
   nom_magasin: "Premium Auto Parts",
-  slogan: "Intelligence Artificielle de pointe pour l'automobile.",
-  description_app: "Un module de scan haute performance conçu pour votre plateforme.",
   devise: "TND",
 
   // --- Thème : Light Aurora (Clair, premium & animé) ---
@@ -15,6 +13,8 @@ export const THEME = {
     primaire:       "#E63946",   // Rouge racing
     primaire_clair: "#ff6b6b",
     secondaire:     "#2A9D8F",   // Vert succès
+    texte:          "#0f172a",   // Texte principal (injecté dans --color-text, main.jsx)
+    texte_attenue:  "#64748b",   // Texte atténué (injecté dans --color-text-muted, main.jsx)
 
     fond:           "#f8fafc",   // Gris très clair bleuté
     surface:        "rgba(255,255,255,0.7)",  // Verre dépoli clair
@@ -22,7 +22,6 @@ export const THEME = {
 
   },
 
-  formats_acceptes: ["image/jpeg", "image/png", "image/webp", "application/pdf", "text/markdown", "text/x-markdown"],
   taille_max_mo: 15,
 };
 

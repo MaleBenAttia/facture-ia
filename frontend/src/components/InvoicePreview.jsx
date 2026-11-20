@@ -3,7 +3,6 @@ import {
   Building2,
   User,
   FileSpreadsheet,
-  FileDown,
   Receipt,
   CheckCircle2,
   CircleSlash,
@@ -15,7 +14,7 @@ import {
 import { Card, CardHeader, CardTitle, CardContent } from "./ui/Card";
 import { Button } from "./ui/Button";
 import { Badge } from "./ui/Badge";
-import { formatMontant, formatNombre, formatPourcentage, estVide } from "../lib/utils";
+import { formatMontant, formatPourcentage, estVide } from "../lib/utils";
 import { THEME } from "../config/theme";
 
 function Champ({ label, valeur }) {
@@ -43,7 +42,6 @@ function AlertsBanner({ analyse }) {
   // Séparer les erreurs/avertissements des succès
   const problems = alertes.filter(a => a.type !== "success" && a.type !== "info");
   const success  = alertes.filter(a => a.type === "success");
-  const infos    = alertes.filter(a => a.type === "info");
 
   return (
     <div className="space-y-2">
@@ -81,7 +79,7 @@ function AlertsBanner({ analyse }) {
   );
 }
 
-export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf, telechargement }) {
+export function InvoicePreview({ resultat, onTelechargerExcel, telechargement }) {
   if (!resultat) return null;
   const { facture: f = {}, client: c = {}, produits = [] } = resultat.data || {};
   
@@ -306,7 +304,7 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
               {produitsTronques && (
                 <tr className="bg-amber-50/20">
                   <td colSpan={col_order.length || (fallbackColonnes ? Object.values(fallbackColonnes).filter(Boolean).length + 3 + proSupKeys.length : 8)} className="py-3 text-center text-amber-600 text-xs font-medium">
-                    ... et {produits.length - 50} autres produits (voir Excel/PDF complets)
+                    ... et {produits.length - 50} autres produits (voir l'Excel complet)
                   </td>
                 </tr>
               )}
@@ -363,16 +361,6 @@ export function InvoicePreview({ resultat, onTelechargerExcel, onTelechargerPdf,
         >
           <FileSpreadsheet className="h-4.5 w-4.5" />
           {telechargement === "excel" ? "Téléchargement…" : "Télécharger Excel"}
-        </Button>
-        <Button
-          variant="primary"
-          size="lg"
-          className="flex-1"
-          onClick={onTelechargerPdf}
-          disabled={telechargement === "pdf"}
-        >
-          <FileDown className="h-4.5 w-4.5" />
-          {telechargement === "pdf" ? "Téléchargement…" : "Télécharger PDF"}
         </Button>
       </div>
     </div>

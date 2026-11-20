@@ -1,7 +1,5 @@
-import PIL.Image
-import io
 import yaml
-import json, os, random, threading, time
+import json, os, random, re, threading, time
 from pathlib import Path
 from datetime import date, datetime
 from dotenv import load_dotenv
@@ -33,8 +31,8 @@ if not GEMINI_API_KEYS:
     raise EnvironmentError("Aucune clé API Gemini trouvée dans le fichier .env ! "
                            "Définissez GEMINI_API_KEY1..6 ou GEMINI_API_KEY.")
 
-# ─── MODÈLE UNIQUE (Gemini Flash, pas de fallback multi-modèle) ──────────────
-MODELES = ["gemini-2.5-flash"]
+# ─── MODÈLE UNIQUE (SDK google-genai, palier gratuit) ──────────────────────
+MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")  # modèle unique
 
 # ─── ROTATION DES CLÉS (thread-safe) : pool aleatoire, mise de côté si 2 echecs
 #     Quand le pool est vide, toutes les cles redeviennent disponibles.
@@ -61,7 +59,7 @@ _ALIASES_COLONNES = {
     "numero_ligne":  {"numero_ligne", "n°", "n", "no", "num", "ligne"},
     "designation":   {"designation", "désignation", "description", "article", "libellé", "libelle", "produit"},
     "quantite":      {"quantite", "quantité", "qté", "qte", "qty", "qtt"},
-    "prix_u_ht":     {"prix_u_ht", "pu.ht", "pu", "prix unitaire", "prix", "pu ht", "prix_u"},
+    "prix_u_ht":     {"prix_u_ht", "pu.ht", "pu", "prix unitaire", "prix", "pu ht", "prix_u", "prix unitaire ht", "prix u ht"},
     "tva_pct":       {"tva_pct", "tva", "tva %", "tva%"},
     "total_ht_ligne":{"total_ht_ligne", "total ht", "montant ht", "total_ht", "montant_ht", "montant ht"},
     "total_ttc":     {"total_ttc", "total ttc", "montant ttc", "total_ttc", "montant_ttc"},
@@ -70,7 +68,7 @@ _ALIASES_COLONNES = {
 
 _MAPPEUR_SUPP_VERS_STANDARD = {
     "qté": "quantite", "qte": "quantite", "qty": "quantite", "quantité": "quantite",
-    "pu.ht": "prix_u_ht", "pu": "prix_u_ht", "prix": "prix_u_ht",
+    "pu.ht": "prix_u_ht", "pu": "prix_u_ht", "prix": "prix_u_ht", "prix unitaire ht": "prix_u_ht", "prix u ht": "prix_u_ht",
     "tva": "tva_pct", "tva %": "tva_pct", "tva%": "tva_pct",
     "montant ht": "total_ht_ligne", "montant_ht": "total_ht_ligne",
     "total ht": "total_ht_ligne",
@@ -80,10 +78,20 @@ _MAPPEUR_SUPP_VERS_STANDARD = {
 
 
 def _normaliser_nombre(val):
-    """Convertit '1,804' → 1.804 (format tunisien virgule comme decimal)."""
+    """Convertit '1,804' → 1.804 (format tunisien virgule comme decimal).
+    Retire aussi les suffixes collés non numériques : '(20%)' en fin de
+    chaîne et '%' final (ex: '113.40 (20%)' → 113.40, '20%' → 20)."""
     if isinstance(val, (int, float)):
         return val
     val = val.strip().replace(" ", "").replace("\u202f", "").replace("\xa0", "")
+    if not val:
+        return -9999
+    # Retire les parenthèses en fin de chaîne et le "%" final
+    val = re.sub(r"\([^)]*\)$", "", val).rstrip("%")
+    # Si des parenthèses restent au milieu, extrait le premier nombre pur
+    if "(" in val:
+        m = re.search(r"-?\d+(?:[\.,]\d+)*", val)
+        val = m.group(0) if m else ""
     if not val:
         return -9999
     # Compter les points et virgules
@@ -190,6 +198,34 @@ def _parser_tsv_produits(tsv_text):
     return produits, col_order
 
 
+def _rattraper_tva_produits(facture: dict, produits: list):
+    """
+    Si le modele n'a pas rempli la TVA % dans les lignes de produits
+    (ex: la TVA etait collee dans la colonne Total HT comme '113.40 (20%)'),
+    on estime le taux a partir du Total HT et de la TVA totale de la
+    facture, et on remplit les champs vides ainsi que tva_pct de la
+    facture elle-meme.
+    """
+    if not facture or not produits:
+        return
+    try:
+        tva_tot = float(facture.get("montant_tva"))
+        tot_ht  = float(facture.get("total_ht"))
+    except (TypeError, ValueError):
+        return
+    if tva_tot == -9999 or tot_ht == -9999 or not tot_ht:
+        return
+    taux = (tva_tot / tot_ht) * 100
+    if taux <= 0:
+        return
+    taux = round(taux, 2)
+    for p in produits:
+        if p.get("tva_pct") in (None, -9999):
+            p["tva_pct"] = taux
+    if facture.get("tva_pct") in (None, -9999):
+        facture["tva_pct"] = taux
+
+
 def lire_compteur():
     aujourd_hui     = str(date.today())
     minute_actuelle = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -208,10 +244,36 @@ def sauver_compteur(data):
     with open(FICHIER, "w") as f:
         json.dump(data, f)
 
-def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: int = 2, text_content: str = None):
-    """Appelle Gemini Flash, reessaie 1x si 429/503 avec backoff exponentiel."""
+class ConfigGeminiError(RuntimeError):
+    """Erreur de configuration Gemini (code 400/404) : arrêt du job, sans changement de clé."""
+
+class CleApiInvalide(RuntimeError):
+    """Clé API invalide (code 401/403) : clé mise de côté, passage à la suivante."""
+
+class QuotaDepasse(RuntimeError):
+    """Quota du palier gratuit atteint (429/500/503) : clé mise de côté, passage à la suivante."""
+
+
+RATE_LIMIT_PAUSE_S = 1.0  # pause entre deux tentatives (palier gratuit)
+
+
+def _pause_rate_limit():
+    if RATE_LIMIT_PAUSE_S > 0:
+        time.sleep(RATE_LIMIT_PAUSE_S)
+
+
+def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: int = 2,
+                    text_content: str = None):
+    """Appelle Gemini via le SDK google-genai (palier gratuit).
+
+    Gestion des erreurs par code (`except errors.APIError`) :
+    - 400 / 404 : erreur de configuration → ConfigGeminiError (arrêt, pas de changement de clé)
+    - 401 / 403 : clé invalide → CleApiInvalide (clé mise de côté, passage à la suivante)
+    - 429       : quota atteint → backoff exponentiel (2s, 4s, 8s) → QuotaDepasse (clé suivante)
+    - 500 / 503 : retry avec backoff (2s, 4s, 8s), puis clé suivante
+    """
     from google import genai
-    from google.genai import types
+    from google.genai import types, errors
 
     if not api_key or not api_key.strip():
         raise ValueError("api_key est vide ou None. Verifiez GEMINI_API_KEY1..6 dans .env")
@@ -221,28 +283,19 @@ def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: in
     if text_content is not None:
         contents = [text_content, prompt]
     else:
-        pil_images = []
-        for data, mime in pages_data:
-            pil_images.append(PIL.Image.open(io.BytesIO(data)))
-        contents = pil_images + [prompt]
+        contents = [types.Part.from_bytes(data=data, mime_type=mime) for data, mime in pages_data]
+        contents.append(prompt)
 
-    config = types.GenerateContentConfig(
-        max_output_tokens=65536,
-        thinking_config=types.ThinkingConfig(thinking_budget=5555)
-    )
-
-    modele = MODELES[0]
     for tentative in range(1, max_retries + 1):
         try:
             t0 = time.perf_counter()
             response = client.models.generate_content(
-                model=modele,
+                model=MODEL,
                 contents=contents,
-                config=config
             )
             duree = time.perf_counter() - t0
 
-            # ── Métriques de performance ──────────────────────────────
+            # ── Métriques de performance (conservées) ─────────────────────
             usage = getattr(response, "usage_metadata", None)
             tokens_out   = getattr(usage, "candidates_token_count", 0) or 0
             tokens_in    = getattr(usage, "prompt_token_count",     0) or 0
@@ -251,45 +304,61 @@ def _appeler_gemini(api_key: str, pages_data: list, prompt: str, max_retries: in
             tok_s = tokens_out / duree if duree > 0 else 0
 
             print(
-                f"  [PERF] ✅ {modele} | "
+                f"  [PERF] ✅ {MODEL} | "
                 f"⏱  {duree:.2f}s | "
                 f"🚀 {tok_s:.1f} tok/s | "
                 f"in={tokens_in} out={tokens_out}"
                 + (f" think={tokens_think}" if tokens_think else "")
                 + f" total={tokens_total}"
             )
-            # ─────────────────────────────────────────────────────────
+            # ─────────────────────────────────────────────────────────────
 
             # Attache la durée à la réponse pour la réutiliser dans le résumé
             response._perf_duree  = duree
             response._perf_tok_s  = tok_s
 
             return response
-        except Exception as e:
-            dernier_erreur = e
-            msg = str(e)
-            est_503 = "503" in msg or "UNAVAILABLE" in msg
-            est_429 = "429" in msg or "RESOURCE_EXHAUSTED" in msg
 
-            if tentative < max_retries:
-                if est_503:
-                    attente = min(2 ** tentative, 10)
-                    print(f"  [API]  {modele} 503 (tentative {tentative}/{max_retries}) -- attente {attente}s...")
+        except errors.APIError as e:
+            code = getattr(e, "code", None)
+            detail = str(e)
+            attente = min(2 ** tentative, 8)
+
+            if code in (400, 404):
+                # Erreur de configuration : arrêt, pas de réessai, pas de changement de clé
+                print(f"  [API] ❌ {MODEL} erreur de configuration (code {code}) : {detail}")
+                raise ConfigGeminiError(f"Erreur de configuration Gemini ({MODEL}, code {code}) : {detail}")
+
+            elif code in (401, 403):
+                # Clé invalide : mise de côté, passage à la suivante
+                print(f"  [API] ❌ clé invalide (code {code}) → clé mise de côté")
+                raise CleApiInvalide(f"Clé API invalide (code {code}) : {detail}")
+
+            elif code == 429:
+                # Quota du palier gratuit : backoff exponentiel, puis clé suivante
+                print(f"  [API] ⚠️ Quota gratuit atteint (429) -- pause {attente}s, clé suivante")
+                time.sleep(attente)
+                raise QuotaDepasse(f"Quota gratuit atteint (429) : {detail}")
+
+            elif code in (500, 503):
+                if tentative < max_retries:
+                    # Retry avec backoff
+                    print(f"  [API]  {MODEL} {code} (tentative {tentative}/{max_retries}) -- attente {attente}s...")
                     time.sleep(attente)
                     continue
-                elif est_429:
-                    import re as _re
-                    match = _re.search(r"retryDelay['\"]?\s*:\s*['\"]?(\d+\.?\d*)s", msg)
-                    wait = float(match.group(1)) if match else 30
-                    wait = min(wait, 60)
-                    print(f"  [API]  {modele} 429 (tentative {tentative}/{max_retries}) -- attente {wait:.0f}s...")
-                    time.sleep(wait)
-                    continue
-                else:
-                    print(f"  [API]  {modele} erreur (tentative {tentative}/{max_retries}) : {type(e).__name__}")
-                    continue
+                print(f"  [API] ❌ {MODEL} {code} (tentative {tentative}/{max_retries}) : {detail}")
+                raise QuotaDepasse(f"Erreur serveur ({code}) : {detail}")
 
-    raise dernier_erreur or RuntimeError("Impossible d'atteindre Gemini.")
+            else:
+                # Autre erreur API : retry avec backoff, puis clé suivante
+                if tentative < max_retries:
+                    print(f"  [API]  {MODEL} erreur (code {code}) (tentative {tentative}/{max_retries}) -- attente {attente}s...")
+                    time.sleep(attente)
+                    continue
+                print(f"  [API] ❌ {MODEL} erreur (code {code}) (tentative {tentative}/{max_retries}) : {detail}")
+                raise QuotaDepasse(f"Erreur Gemini (code {code}) : {detail}")
+
+    raise RuntimeError("Impossible d'atteindre Gemini.")
 
 
 def extraire_facture(image_path: str, content_type: str = "image/png", cancel_event=None) -> dict:
@@ -350,6 +419,7 @@ REGLES :
 - Champ absent/vide → laisse vide. Valeur numerique absente → -9999. 0 dans la facture → 0.0.
 - Si valeur YAML contient ":" → guillemets doubles ex: "Siège Social : 76, Rue...".
 - Texte en FRANCAIS. Produits par ordre croissant de numero_ligne.
+- Valeurs numeriques (montants, TVA, remise) : ecris des NOMBRES PUREMENT (ex: 20, 10.5, -9999). Jamais de "%", de devise, ni de parenthèses dans les champs numeriques (interdit : "20%", "113.40 (20%)").
 - tva_pct : taux EXACT de la colonne TVA. Jamais 20% par defaut.
 
 DEVISE : Analyse tous les indices (ville, MF, symbole, langue).
@@ -366,6 +436,8 @@ PRODUITS en TSV. La 1ere ligne = les EN-TETES EXACTS de la facture, EXACTEMENT d
 - Les colonnes sont reconnues par leur NOM : designation, quantite, prix_u_ht, tva_pct, total_ht_ligne, total_ttc, remise_pct.
 - numero_ligne : seulement si la facture a une colonne "N°", "Ligne" ou "#". Sinon, NE PAS l'ajouter.
 - Separe par des tabulations. AUCUNE colonne perdue.
+- Les champs numeriques contiennent des nombres pures.
+- Colonne TVA : mets le taux exact de la ligne (ex: 20) ou -9999 si la ligne n'a pas de TVA.
 
 ════════════════════════════════════════
 PARTIE 2 — VERIFICATION
@@ -439,7 +511,7 @@ REF-001\tStylo\t10\t2.5\t19\t25.0\t29.75\t0\tPapeterie
 """
 
 
-    # ── Rotation : pioche aleatoire, 2 tentatives, mise de cote si echec ────
+    # ── Rotation : pioche aleatoire, 1 tentative par cle, mise de cote si echec ────
     response      = None
     api_utilisee  = None
     erreurs_api   = []
@@ -453,9 +525,8 @@ REF-001\tStylo\t10\t2.5\t19\t25.0\t29.75\t0\tPapeterie
             key_index, api_key = _available_keys.pop(idx)
         key_num = key_index + 1
 
-        # 1re tentative avec cette cle
+        print(f"\n  [API] Tentative avec la clé n°{key_num}...")
         try:
-            print(f"\n  [API] Tentative avec la clé n°{key_num}...")
             if is_markdown:
                 response = _appeler_gemini(api_key, [], prompt, text_content=markdown_text)
             else:
@@ -463,28 +534,18 @@ REF-001\tStylo\t10\t2.5\t19\t25.0\t29.75\t0\tPapeterie
             api_utilisee = key_num
             print(f"  [API] ✅ Clé n°{key_num} a répondu avec succès.")
             break
+        except ConfigGeminiError as e:
+            # Erreur de configuration : arrêt complet du job, sans changement de clé
+            print(f"  [API] ❌ {e}")
+            raise
         except Exception as e:
-            msg = f"Clé n°{key_num} (1er essai) → {type(e).__name__}: {e}"
+            # Clé mise de côté (401/403/429/500/503/autres) : passage à la suivante
+            msg = f"Clé n°{key_num} → {type(e).__name__}: {e}"
             erreurs_api.append(msg)
             print(f"  [API] ❌ {msg}")
-
-            # 2e tentative avec la même clé
-            try:
-                print(f"  [API] ↻ 2e tentative avec la clé n°{key_num}...")
-                if is_markdown:
-                    response = _appeler_gemini(api_key, [], prompt, text_content=markdown_text)
-                else:
-                    response = _appeler_gemini(api_key, pages_data, prompt)
-                api_utilisee = key_num
-                print(f"  [API] ✅ Clé n°{key_num} a répondu au 2e essai.")
-                break
-            except Exception as e2:
-                msg2 = f"Clé n°{key_num} (2e essai) → {type(e2).__name__}: {e2}"
-                erreurs_api.append(msg2)
-                print(f"  [API] ❌ {msg2}")
-                print(f"  [API] ⛔ Clé n°{key_num} mise de côté pour ce cycle")
-                # La clé reste retirée de _available (mise de côté)
-                continue
+            print(f"  [API] ⛔ Clé n°{key_num} mise de côté pour ce cycle")
+            _pause_rate_limit()
+            continue
 
     if response is None:
         detail = " | ".join(erreurs_api)
@@ -579,6 +640,10 @@ REF-001\tStylo\t10\t2.5\t19\t25.0\t29.75\t0\tPapeterie
         resultat["col_order"] = col_order
     elif "produits" not in resultat:
         resultat["produits"] = []
+
+    # Si le modele n'a pas mis de TVA % dans les produits, on l'estime a
+    # partir des totaux facture (voir _rattraper_tva_produits).
+    _rattraper_tva_produits(resultat.get("facture", {}), resultat["produits"])
 
     # ── Tokens et quotas (affiché en dernier dans le debug) ──────────────
     restant_jour   = QUOTA_JOUR   - compteur["requetes_jour"]

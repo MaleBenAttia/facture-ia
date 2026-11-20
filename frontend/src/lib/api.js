@@ -31,17 +31,6 @@ async function gererReponse(res) {
   return res;
 }
 
-/** Vérifie que le backend répond. */
-export async function verifierSante() {
-  try {
-    const res = await fetch(`${API_BASE}/health`);
-    await gererReponse(res);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Upload le fichier vers /preview, reçoit l'image prétraitée en PNG.
  * @returns {Promise<Blob>}
@@ -123,7 +112,7 @@ export async function traiterFacture(file, signal, onJobStarted, onProgress) {
           throw new ApiError("Erreur parsing réponse serveur (JSON trop volumineux ou invalide)", 500);
         }
         const { data } = responseData;
-        return { data, excel: job.excel, pdf: job.pdf };
+        return { data, excel: job.excel };
       }
       if (job.status === "processing") {
         if (onProgress && typeof job.progress === "number") {
@@ -156,15 +145,10 @@ export async function annulerJob(jobId) {
 }
 
 
+
 /** Construit l'URL de téléchargement pour une feuille Excel donnée. */
 export function urlExcel(sheet) {
   return `${API_BASE}/excel/${sheet}`;
-}
-
-/** Construit l'URL de téléchargement pour un PDF généré. */
-export function urlPdf(filename) {
-  const nom = filename?.split("/").pop() || filename;
-  return `${API_BASE}/pdf/${nom}`;
 }
 
 /** Déclenche le téléchargement d'un fichier depuis une URL donnée. */

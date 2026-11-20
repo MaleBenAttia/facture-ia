@@ -1,5 +1,5 @@
 # main.py — Routeur FastAPI : recoit le fichier, lance le job en thread,
-# sert le frontend build, gere le polling status et les telechargements.
+# sert le frontend build, gere le polling status.
 
 from pathlib import Path
 from dotenv import load_dotenv
@@ -12,7 +12,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from gemini_extractor import extraire_facture
 from excel_generator import json_vers_excel
-from pdf_generator import json_vers_pdf
 import cv2
 from image_preprocessor import preparer_image_pour_llm
 import shutil, os, uuid, asyncio, threading
@@ -30,7 +29,7 @@ app.add_middleware(
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/tiff", "image/bmp", "application/pdf", "text/markdown", "text/x-markdown"]
+ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/tiff", "image/bmp", "application/pdf", "text/markdown", "text/x-markdown", "text/plain"]
 
 # Stockage memoire des jobs en cours + annulation thread-safe
 _jobs:        dict = {}
@@ -72,7 +71,7 @@ def _compter_pages(path: str, content_type: str) -> int:
 
 
 def _run_job(job_id: str, path: str, content_type: str, cancel_event: threading.Event, nb_pages: int = 1):
-    """Thread worker : Gemini → Excel → PDF, avec annulation et progression."""
+    """Thread worker : Gemini, avec annulation et progression."""
     short = job_id[:8]
     print(f"\n[JOB {short}] Démarrage traitement ({nb_pages} page(s))...")
     try:
@@ -100,19 +99,12 @@ def _run_job(job_id: str, path: str, content_type: str, cancel_event: threading.
         if _job_est_annule(job_id, cancel_event):
             print(f"[JOB {short}] Annule apres generation Excel - resultat ignore.")
             return
-        _maj_progress(job_id, 85)
-        print(f"[JOB {short}] Excel OK — génération PDF...")
-        pdf_filename   = os.path.basename(json_vers_pdf(result))
-        if _job_est_annule(job_id, cancel_event):
-            print(f"[JOB {short}] Annule apres generation PDF - resultat ignore.")
-            return
         _maj_progress(job_id, 99)
         with jobs_lock:
             _jobs[job_id] = {
                 "status": "done",
                 "data": result,
                 "excel": excel_filename,
-                "pdf":   pdf_filename,
             }
         print(f"[JOB {short}] ✅ TERMINÉ — résultat disponible sur l'appareil")
     except Exception as exc:
@@ -209,7 +201,7 @@ def status(job_id: str):
     if job is None or job.get("status") == "not_found":
         return {"status": "not_found"}
     if job["status"] == "done":
-        return {"status": "done", "excel": job["excel"], "pdf": job["pdf"],
+        return {"status": "done", "excel": job["excel"],
                 "nb_pages": job.get("nb_pages", 1)}
     resp = {k: v for k, v in job.items() if k != "data"}
     return resp
@@ -228,7 +220,7 @@ def result(job_id: str):
 def _fichier_appartient_a_un_job(filename: str) -> bool:
     with jobs_lock:
         return any(
-            job.get("status") == "done" and (job.get("excel") == filename or job.get("pdf") == filename)
+            job.get("status") == "done" and job.get("excel") == filename
             for job in _jobs.values()
         )
 
@@ -246,17 +238,6 @@ def download_excel(filename: str):
         filename=filename,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-
-
-@app.get("/pdf/{filename}")
-def download_pdf(filename: str):
-    """Telecharge un PDF genere (verifie qu'il appartient a un job done)."""
-    if not _fichier_appartient_a_un_job(filename):
-        raise HTTPException(status_code=404, detail="Fichier non disponible")
-    path = f"outputs/{filename}"
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="PDF non trouve")
-    return FileResponse(path, filename=filename, media_type="application/pdf")
 
 
 # TOUJOURS EN DERNIER

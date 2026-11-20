@@ -1,12 +1,12 @@
 # 🧾 Facture-IA — Extraction intelligente de factures
 
-Système complet et moderne pour scanner une facture (image ou PDF), en extraire les données structurées via l'Intelligence Artificielle (Gemini 2.5), et générer des exports formatés (Excel & PDF propres).
+Système complet et moderne pour scanner une facture (image ou PDF), en extraire les données structurées via l'Intelligence Artificielle (gemini-3.1-flash-lite), et générer un export formaté (Excel).
 
 ## 🚀 Fonctionnalités
 - **Interface Premium** : Design "Light Aurora" avec verre dépoli (Glassmorphism), animations cinématiques (Scroll/Float), et indicateurs de traitement dynamiques.
 - **Support Multi-format** : Import de factures aux formats JPG, PNG, WEBP et PDF (jusqu'à 15 Mo).
 - **Extraction par IA (Google Gemini)** : Analyse instantanée des montants, TVA, numéros de factures, et détail ligne par ligne des pièces (références, quantités, prix unitaires).
-- **Exports direct** : Téléchargement immédiat du tableau structuré au format Excel (`.xlsx`) ou PDF (`.pdf`).
+- **Export direct** : Téléchargement immédiat du tableau structuré au format Excel (`.xlsx`).
 - **Historique de Session** : Garde une trace visuelle de toutes les factures traitées durant votre session.
 - **Prétraitement automatique des images** : Upscaling adaptatif, rehaussement de contraste (CLAHE), netteté optimisée avant envoi au LLM.
 - **Aperçu instantané** : Dès l'upload, l'image prétraitée est affichée dans l'interface (PDF converti en image visible).
@@ -36,11 +36,10 @@ facture-ia/
 ├── .env                    # 🔐 Variables d'environnement (Clé API Gemini)
 ├── requirements.txt        # 📦 Dépendances Python (FastAPI, google-genai, etc.)
 ├── main.py                 # ⚙️ SERVEUR BACKEND (FastAPI - Routes et configuration)
-├── gemini_extractor.py     # Logique métier : Appel à l'API Gemini 2.5 pour l'extraction
+├── gemini_extractor.py     # Logique métier : Appel à l'API Gemini (gemini-3.1-flash-lite) pour l'extraction
 ├── image_preprocessor.py   # 🖼️ Pipeline de prétraitement : upscale, CLAHE, sharpening
 ├── imagetraiter/           # 📁 Dossier de débogage : dernière image envoyée à Gemini
-├── excel_generator.py      # Génération du fichier Excel via openpyxl
-└── pdf_generator.py        # Génération du fichier PDF via reportlab
+└── excel_generator.py      # Génération du fichier Excel via openpyxl
 ```
 
 ---
@@ -57,8 +56,8 @@ facture-ia/
 ### Backend
 - **Framework API :** FastAPI (Performant et typé)
 - **Serveur WSGI :** Uvicorn
-- **Modèle IA :** Google Gemini 2.5 (via le SDK `google-genai`)
-- **Génération de fichiers :** `openpyxl` (Excel) et `reportlab` (PDF)
+- **Modèle IA :** Google Gemini (via le SDK `google-genai`) — `gemini-3.1-flash-lite`
+- **Génération de fichiers :** `openpyxl` (Excel)
 - **Prétraitement d'images :** `opencv-contrib-python-headless` (CLAHE, upscaling, ombre, netteté)
 - **Extraction PDF :** `pymupdf` (conversion PDF → image, extraction page)
 
@@ -141,7 +140,7 @@ L'image finale est encodée en PNG et envoyée à Gemini. Une copie est conserv�
 | **Validation PNG** | Vérification que `cv2.imencode` produit bien un PNG valide avant envoi à Gemini. |
 | **Thread safety** | `threading.Lock()` sur les jobs partagés (`_jobs`, `_job_cancel`, compteur d'usage). |
 | **Taille max upload** | Vérification 15 Mo côté backend (HTTP 413 si dépassé). |
-| **Sécurité downloads** | Les endpoints `/excel/` et `/pdf/` vérifient que le fichier appartient à un job terminé. |
+| **Sécurité downloads** | L'endpoint `/excel/` vérifie que le fichier appartient à un job terminé. |
 
 ---
 
@@ -149,13 +148,13 @@ L'image finale est encodée en PNG et envoyée à Gemini. Une copie est conserv�
 
 ---
 
-## 🚀 Lancement rapide (Windows)
+## 🚀 Lancement rapide
 
-```batch
-start.bat
+```bash
+cd C:\Users\user\Desktop\facture-ia
+venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Double-clique sur `start.bat` → active le venv + lance le serveur automatiquement.
 Ouvre http://localhost:8000 dans ton navigateur.
 
 ---

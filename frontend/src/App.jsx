@@ -7,7 +7,7 @@ import { InvoicePreview } from "./components/InvoicePreview";
 import { InvoiceHistory } from "./components/InvoiceHistory";
 import { ToastProvider, useToast } from "./components/ui/Toast";
 import { FloatingIconsBackground } from "./components/FloatingIconsBackground";
-import { traiterFacture, annulerJob, urlExcel, urlPdf, telecharger, previsualiserFacture, ApiError } from "./lib/api";
+import { traiterFacture, annulerJob, urlExcel, telecharger, previsualiserFacture, ApiError } from "./lib/api";
 
 /* Animation d'entrée au scroll pour les sections */
 const fadeUp = {
@@ -201,20 +201,6 @@ function AppContenu() {
     }
   }, [resultat, toast]);
 
-  const handleTelechargerPdf = useCallback(async () => {
-    if (!resultat?.pdf) return;
-    setTelechargement("pdf");
-    try {
-      const nom = resultat.pdf.split("/").pop();
-      await telecharger(urlPdf(resultat.pdf), nom);
-      toast({ variant: "success", title: "PDF téléchargé" });
-    } catch {
-      toast({ variant: "error", title: "Téléchargement impossible" });
-    } finally {
-      setTelechargement(null);
-    }
-  }, [resultat, toast]);
-
   return (
     <div className="min-h-screen" style={{ backgroundColor: "var(--color-bg)" }}>
 
@@ -264,7 +250,6 @@ function AppContenu() {
                   progression={progression}
                   fichierActuel={fichierActuel}
                   previewProcessedUrl={previewProcessedUrl}
-                  dureeTraitement={dureeTraitement}
                   nbPages={nbPages}
                   onFileReady={handleFichierSelect}
                   onScanConfirm={lancerTraitement}
@@ -295,7 +280,6 @@ function AppContenu() {
                     resultat={resultat}
                     telechargement={telechargement}
                     onTelechargerExcel={handleTelechargerExcel}
-                    onTelechargerPdf={handleTelechargerPdf}
                   />
                 </DarkCard>
               </motion.section>

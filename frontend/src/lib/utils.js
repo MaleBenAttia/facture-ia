@@ -20,17 +20,6 @@ export function formatMontant(val, devise = "DT", decimals = 3) {
   return `${num.toFixed(decimals)} ${devise}`;
 }
 
-/**
- * Formate un nombre simple (quantité, pourcentage) en gérant les valeurs
- * absentes et les valeurs non numériques (ex: "Tout-En-Un").
- */
-export function formatNombre(val, decimals = 0) {
-  if (val === null || val === undefined || val === -9999) return "—";
-  const num = Number(val);
-  if (Number.isNaN(num)) return String(val);
-  return num.toFixed(decimals);
-}
-
 /** Formate un pourcentage de TVA/remise en gérant les valeurs absentes. */
 export function formatPourcentage(val) {
   if (val === null || val === undefined || val === -9999) return "—";

@@ -15,7 +15,7 @@ const MESSAGES = [
   "Finalisation de l'extraction…",
 ];
 
-export function ScanZone({ onFileReady, onScanConfirm, etat, progression, fichierActuel, previewProcessedUrl, dureeTraitement, onAnnuler, nbPages }) {
+export function ScanZone({ onFileReady, onScanConfirm, etat, progression, fichierActuel, previewProcessedUrl, onAnnuler, nbPages }) {
   const [erreurLocale, setErreurLocale] = useState(null);
   const [messageIndex, setMessageIndex] = useState(0);
   const [timerLocal, setTimerLocal] = useState(0);

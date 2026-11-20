@@ -37,7 +37,7 @@ def pdf_vers_images(pdf_bytes: bytes, dpi: int = 300) -> list:
 
 def extraire_image_de_lentree(file_bytes: bytes, content_type: str):
     """Detecte le type (image / PDF / markdown), appelle pdf_vers_images ou decode directement."""
-    if content_type in ("text/markdown", "text/x-markdown"):
+    if content_type in ("text/markdown", "text/x-markdown", "text/plain"):
         return None, "markdown"
 
     if content_type == "application/pdf":
